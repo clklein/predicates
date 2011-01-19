@@ -2,17 +2,18 @@
 
 @(require (for-label racket
                      "main.rkt")
+          planet/scribble
           scribble/eval)
 
 @(define example-evaluator (make-base-eval))
-@(interaction-eval #:eval example-evaluator (require predicates rackunit))
+@(interaction-eval #:eval example-evaluator (require "main.rkt" rackunit))
 
 @title{@racket[predicates] manual}
 
 This collection provides a syntax for defining predicates inductively (e.g., typing rules) and
 a tool for generating random objects that satisfy these predicates (e.g., typing derivations).
 
-@defmodule[predicates]
+@defmodule/this-package[main]
 
 @defform/subs[(define-predicate rule ...)
               ([rule [premise ...

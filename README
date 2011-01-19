@@ -1,12 +1,23 @@
-To build the documentation (and to avoid requiring the module by its
-path), put this directory inside a directory that Racket searches for
-collections and run the command
+This collection can be used by specifying its path, for example,
 
-$ raco setup -l predicates
+(require "predicates/main.rkt")
 
-The documentation appears in the `doc' subdirectory.
+but building the documentation requires a couple steps.
 
-One way to get Racket to find this collection is to set the
-PLTCOLLECTS environment variable.
+1. Create a PLaneT hard link to this directory.
 
-$ export PLTCOLLECTS=`cd ..; pwd`:
+$ raco planet link $username predicates.plt 1 0 .
+
+(This collection isn't actually distributed via PLaneT; we're just
+piggybacking on the convenience of its development links.
+Consequently, the particular username and version numbers aren't
+important.)
+
+2. Build the collection.
+
+$ raco setup -P $username predicates.plt 1 0
+
+After complete these steps, the collection can be used without
+directly specifying its path.
+
+(require (planet $username/predicates:1:0))
