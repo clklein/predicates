@@ -1,0 +1,12 @@
+To build the documentation (and to avoid requiring the module by its
+path), put this directory inside a directory that Racket searches for
+collections and run the command
+
+$ raco setup -l predicates
+
+The documentation appears in the `doc' subdirectory.
+
+One way to get Racket to find this collection is to set the
+PLTCOLLECTS environment variable.
+
+$ export PLTCOLLECTS=`cd ..; pwd`:
