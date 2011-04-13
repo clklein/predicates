@@ -11,7 +11,10 @@
          current-permutations
          make-permutations
          bound-measure
-         revisit-solved-goals?)
+         revisit-solved-goals?
+         
+         no-bound-rules
+         user-goal-solver)
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
@@ -66,6 +69,10 @@
 (define bound-measure (make-parameter 'size))
 (define revisit-solved-goals? (make-parameter #t))
 
+(define no-bound-rules (make-parameter '()))
+(define (no-bound? rule-name)
+  (member rule-name (no-bound-rules)))
+
 (define-syntax (make-rule stx)
   (syntax-case stx ()
     [(_ ((prem-name . prem-body) ...) (conc-name . conc-body) rule-name instantiations def-form)
@@ -81,7 +88,8 @@
                   (match ps
                     ['() (succ env bound fail)]
                     [(cons (list p b) ps’)
-                     (p b env (sub1 bound) 
+                     (p b env 
+                        (if (no-bound? 'conc-name) bound (sub1 bound)) 
                         (λ (env bound’ fail’) 
                           (loop ps’ env 
                                 (match (bound-measure)
@@ -98,7 +106,7 @@
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        #`(define (name term env bound succ fail)
            (define instantiations (make-hash))
-           (if (positive? bound)
+           (if (or (positive? bound) (no-bound? 'name))
                (let loop ([rules ((current-permutations)
                                   (list (make-rule (premises ...) conclusion rule-name instantiations def-form) 
                                         ...))])
@@ -106,7 +114,29 @@
                    ['() (fail)]
                    [(cons r rs)
                     (r term env bound succ (λ () (loop rs)))]))
-               (fail))))]))
+               (match ((user-goal-solver) (make-user-goal (cons 'name term) env) env)
+                 [#f (fail)]
+                 [env (succ env bound fail)]))))]))
+
+(define (make-user-goal term env)
+  (define substitution
+    (solution
+     (make-immutable-hash
+      (let vars ([t term])
+        (match t
+          [(lvar x) (list (cons x x))]
+          [(? list?) (append-map vars t)]
+          [_ empty])))
+     env))
+  (let substitute ([t term])
+    (match t
+      [(lvar x)
+       (second (assoc x substitution))]
+      [(? list?)
+       (map substitute t)]
+      [_ t])))
+
+(define user-goal-solver (make-parameter (λ (term env) #f)))
 
 ;; term ::= atom | (lvar symbol) | (listof term)
 ;; env ::= (dict/c symbol term)

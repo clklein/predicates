@@ -7,7 +7,7 @@
 
 ; Prints some random arrow-typed expressions. For example,
 ;
-; $ racket -tm- generation --size 10 5
+; $ racket -tm- generation.rkt --size 10 5
 ;
 ; prints 10 expressions, each having typing derivations with size less than 5
 ;
@@ -52,7 +52,7 @@
 
 (define (random-expr-instance expr [env (make-hash)])
   (define (random-constant)
-    (generate-term CCA constant 1))
+    (generate-term CCA k 1))
   (define (random-number)
     (generate-term CCA real (random 3)))
   (let recur ([e expr])
@@ -84,3 +84,41 @@
   (time
    (for ([_ (in-range samples)])
      (pretty-display (random-arrow size)))))
+
+(define (generate-base term env)
+  (define result
+    (match term
+      [`(typeof ,Γ ,(lvar x) ,τ)
+       (let-values ([(e env’) (generate-base-type Γ τ env)])
+         (hash-set env’ x e))]
+      [_ #f]))
+  result)
+
+(define (generate-base-type Γ τ env)
+  (match τ
+    [(lvar x)
+     (values `(num ,(lvar (gensym 'n))) (hash-set env x 'num))]
+    ['num
+     (values `(num ,(lvar (gensym 'n))) env)]
+    ['unit
+     (values '(unit) env)]
+    [`(pair ,α ,β)
+     (let*-values ([(a env’) (generate-base-type Γ α env)]
+                   [(b env’’) (generate-base-type Γ β env)])
+       (values `(pair ,a ,b) env’’))]
+    [`(-> ,α ,β)
+     (let-values ([(b env’) (generate-base-type Γ β env)])
+       (values `(λ ,b) env’))]
+    [`(arr ,α ,β)
+     (let-values ([(f env’) (generate-base-type Γ `(-> ,α ,β) env)])
+       (values `(arr ,f) env’))]))
+
+(define (test-user-gen [seed (random (expt 2 31))])
+  (random-seed seed)
+  (define expr 
+    (parameterize ([user-goal-solver generate-base]
+                   [no-bound-rules '(bound)])
+      (random-arrow 10)))
+  (if (generate (typeof • ,(to-type-form expr) (? τ)) +inf.0)
+      #t
+      (values seed expr)))

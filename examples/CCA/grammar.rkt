@@ -29,5 +29,4 @@
      loop init
      
      real
-     True False
      + * /))
