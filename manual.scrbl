@@ -6,7 +6,9 @@
           scribble/eval)
 
 @(define example-evaluator (make-base-eval))
-@(interaction-eval #:eval example-evaluator (require "main.rkt" rackunit))
+@(interaction-eval 
+  #:eval example-evaluator 
+  (require "main.rkt" rackunit racket/match))
 
 @title{@racket[predicates] manual}
 
@@ -99,6 +101,62 @@ the following test checks that @math{2 × 3 = 6}.
 When @racket[measure] is @racket['depth], @racket[generate] only considers instantiations
 whose corresponding derivation trees have depth less than the given value; when @racket[measure]
 is @racket['size] (the default), the derivation trees must have total size less than the given value.}
+
+@defparam[unbounded-predicates predicates (listof procedure?)]{
+Configures @racket[bound-measure] to ignore the depth/size of derivations of the
+forms in @racket[predicates] (default @racket[empty]).
+
+@examples[
+#:eval example-evaluator
+       (define-predicate
+         [(p)
+          (q)
+          "q"])
+       (define-predicate
+         [(p)
+          "p"])
+       (generate (q) 1)
+       (parameterize ([unbounded-predicates (list p)])
+         (generate (q) 1))]
+}
+
+@defparam[user-goal-solver solver (-> procedure? term/c (hash/c symbol? term/c)
+                                      (or/c #f (hash/c symbol? term/c)))]{
+Specifies a procedure @racket[solver] to be tried before backtracking when the
+depth/size bound is zero. 
+
+The procedure receives a predicate (to identify the goal's form), a single 
+@tech{term} representing the predicate's arguments, and a hash mapping the 
+names of (instantiated) @racket[lvar]s to @tech{terms}. When the @tech{term}
+supplied as the second argument contains @racket[lvar]s, those variables
+are totally uninstantiated, but when an @racket[lvar] appears in the range
+of the third argument, that variable may already be instantiated (i.e., it
+may be in the domain of the third argument).
+
+To indicate that it has solved the goal, the procedure returns an extension
+of the third argument (instantiating any variables necessary). The procedure
+may return @racket[#f] to indicate that it could not solve the goal.
+
+The default value for @racket[solver] solves no goals.
+
+@examples[
+#:eval example-evaluator
+       (define-predicate
+         [(q a (? x))
+          (p (? x))
+          "p"])
+       (define-predicate
+         [(q (? x) (? y))
+          "q"])
+       (generate (p (? x)) 1)
+       (parameterize ([user-goal-solver 
+                       (λ (pred term map)
+                         (and (equal? pred q)
+                              (match term
+                                [(list 'a (lvar y))
+                                 (hash-set map y 'b)])))])
+         (generate (p (? x)) 1))]
+}
 
 @defparam[revisit-solved-goals? revisit? boolean?]{
 When @racket[revisit?] is non-@racket[false] (the default), @racket[generate] backtracks on 

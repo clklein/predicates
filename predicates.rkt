@@ -12,8 +12,7 @@
          make-permutations
          bound-measure
          revisit-solved-goals?
-         
-         no-bound-rules
+         unbounded-predicates
          user-goal-solver)
 
 (define-syntax-rule (generate (form-name . body) bound)
@@ -23,15 +22,17 @@
                (λ () #f))))
 
 (define (solution vars env)
-  (define extract
-    (match-lambda
-      [(lvar x)
-       (match (hash-ref env x (uninstantiated))
-         [(uninstantiated) (lvar x)]
-         [t (extract t)])]
-      [(cons t u) (cons (extract t) (extract u))]
-      [t t]))
-  (hash-map vars (λ (x y) (list x (extract (lvar y))))))
+  (hash-map vars (λ (x y) (list x (valuation (lvar y) env)))))
+
+(define (valuation term env)
+  (match term
+    [(lvar x)
+     (match (hash-ref env x (uninstantiated))
+       [(uninstantiated) (lvar x)]
+       [t (valuation t env)])]
+    [(cons t u)
+     (cons (valuation t env) (valuation u env))]
+    [t t]))
 
 (struct uninstantiated ())
 
@@ -69,9 +70,9 @@
 (define bound-measure (make-parameter 'size))
 (define revisit-solved-goals? (make-parameter #t))
 
-(define no-bound-rules (make-parameter '()))
-(define (no-bound? rule-name)
-  (member rule-name (no-bound-rules)))
+(define unbounded-predicates (make-parameter '()))
+(define (unbounded-predicate? pred)
+  (member pred (unbounded-predicates)))
 
 (define-syntax (make-rule stx)
   (syntax-case stx ()
@@ -89,7 +90,7 @@
                     ['() (succ env bound fail)]
                     [(cons (list p b) ps’)
                      (p b env 
-                        (if (no-bound? 'conc-name) bound (sub1 bound)) 
+                        (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
                         (λ (env bound’ fail’) 
                           (loop ps’ env 
                                 (match (bound-measure)
@@ -106,7 +107,7 @@
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        #`(define (name term env bound succ fail)
            (define instantiations (make-hash))
-           (if (or (positive? bound) (no-bound? 'name))
+           (if (or (positive? bound) (unbounded-predicate? name))
                (let loop ([rules ((current-permutations)
                                   (list (make-rule (premises ...) conclusion rule-name instantiations def-form) 
                                         ...))])
@@ -114,29 +115,17 @@
                    ['() (fail)]
                    [(cons r rs)
                     (r term env bound succ (λ () (loop rs)))]))
-               (match ((user-goal-solver) (make-user-goal (cons 'name term) env) env)
+               (match ((user-goal-solver) name (make-user-goal term env) env)
                  [#f (fail)]
                  [env (succ env bound fail)]))))]))
 
 (define (make-user-goal term env)
-  (define substitution
-    (solution
-     (make-immutable-hash
-      (let vars ([t term])
-        (match t
-          [(lvar x) (list (cons x x))]
-          [(? list?) (append-map vars t)]
-          [_ empty])))
-     env))
   (let substitute ([t term])
-    (match t
-      [(lvar x)
-       (second (assoc x substitution))]
-      [(? list?)
-       (map substitute t)]
-      [_ t])))
+    (cond [(lvar? t) (valuation t env)]
+          [(cons? t) (map substitute t)]
+          [else t])))
 
-(define user-goal-solver (make-parameter (λ (term env) #f)))
+(define user-goal-solver (make-parameter (λ (pred term env) #f)))
 
 ;; term ::= atom | (lvar symbol) | (listof term)
 ;; env ::= (dict/c symbol term)

@@ -7,7 +7,7 @@
 
 ; Prints some random arrow-typed expressions. For example,
 ;
-; $ racket -tm- generation.rkt --size 10 5
+; $ racket -tm- generation.rkt --size --unbounded-variable-derivations --solve-base-cases 10 5
 ;
 ; prints 10 expressions, each having typing derivations with size less than 5
 ;
@@ -35,10 +35,18 @@
     "Bounds the size of the typing derivations of random expressions"
     (bound-measure 'size)]
    
+   #:once-any
+   ["--unbounded-variable-derivations"
+    "Excludes the depth/size of `bound' derivations"
+    (unbounded-predicates (list bound))]
+   
    #:once-each
    ["--no-revisit-solved"  
     "Disables backtracking to find different solutions to solved goals"
     (revisit-solved-goals? #f)]
+   ["--solve-base-cases"
+    "Chooses a simple solution when the depth/size bound is zero"
+    (user-goal-solver generate-base)]
    ["--seed"
     n
     "Seed with PRG with n"
@@ -85,14 +93,13 @@
    (for ([_ (in-range samples)])
      (pretty-display (random-arrow size)))))
 
-(define (generate-base term env)
-  (define result
-    (match term
-      [`(typeof ,Γ ,(lvar x) ,τ)
-       (let-values ([(e env’) (generate-base-type Γ τ env)])
-         (hash-set env’ x e))]
-      [_ #f]))
-  result)
+(define (generate-base pred term env)
+  (cond [(equal? pred typeof)
+         (match term
+           [(list Γ (lvar x) τ)
+            (let-values ([(e env’) (generate-base-type Γ τ env)])
+              (hash-set env’ x e))])]
+        [else #f]))
 
 (define (generate-base-type Γ τ env)
   (match τ
@@ -112,13 +119,3 @@
     [`(arr ,α ,β)
      (let-values ([(f env’) (generate-base-type Γ `(-> ,α ,β) env)])
        (values `(arr ,f) env’))]))
-
-(define (test-user-gen [seed (random (expt 2 31))])
-  (random-seed seed)
-  (define expr 
-    (parameterize ([user-goal-solver generate-base]
-                   [no-bound-rules '(bound)])
-      (random-arrow 10)))
-  (if (generate (typeof • ,(to-type-form expr) (? τ)) +inf.0)
-      #t
-      (values seed expr)))

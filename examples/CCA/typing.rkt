@@ -5,6 +5,7 @@
          redex/reduction-semantics)
 
 (provide typeof
+         bound
          to-type-form
          from-type-form)
 

@@ -266,6 +266,49 @@
                  [revisit-solved-goals? #f])
     (check-not-false (generate (r1 b) +inf.0))))
 
+; unbounded-predicates
+(let ()
+  (define-predicate
+    [(q (? x))
+     (p (? x))
+     "p"])
+  (define-predicate
+    [(q a)
+     "qa"]
+    [(r)
+     (q b)
+     "qb"])
+  (define-predicate
+    [(r)
+     "r"])
+  (check-false (generate (p a) 1))
+  (parameterize ([unbounded-predicates (list q)])
+    (check-not-false (generate (p a) 1)))
+  (parameterize ([unbounded-predicates (list q)])
+    (check-false (generate (p b) 1)))
+  (parameterize ([unbounded-predicates (list q r)])
+    (check-not-false (generate (p b) 1))))
+
+; user-goal-solver
+(let ()
+  (define-predicate
+    [(q a (? x))
+     (p (? x))
+     "p"])
+  (define-predicate
+    [(q (? x) (? y))
+     "q"])
+  (check-false (generate (p (? x)) 1))
+  (parameterize ([user-goal-solver (λ (p t e) #f)])
+    (check-false (generate (p (? x)) 1)))
+  (parameterize ([user-goal-solver 
+                  (λ (p t e)
+                    (and (equal? p q)
+                         (match t
+                           [(list 'a (lvar y))
+                            (hash-set e y 'b)])))])
+    (check-equal? (generate (p (? x)) 1) '((x b)))))
+
 (let ()
   (define-predicate
     [(eq (? x) ,'a)
