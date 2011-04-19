@@ -1,2 +1,4 @@
-compiled
-doc
+compiled/
+doc/
+*.rkt~
+*.scrbl~
