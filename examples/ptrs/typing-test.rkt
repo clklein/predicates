@@ -1,7 +1,7 @@
 #lang racket
 
 (require "typing.rkt"
-         (only-in "../../predicates.rkt" generate current-permutations)
+         "../../main.rkt"
          rackunit)
 
 (define-syntax-rule (test-judgment-holds j)
@@ -25,8 +25,27 @@
 (test-judgment-holds 
  (well-typed-prog ((var lit-int : int) •)
                   (stmt (expr lit-int))))
-
-; TODO: more well-typed-prog tests
+(test-judgment-does-not-hold 
+ (well-typed-prog ((var lit-int : (* int)) •)
+                  (stmt (expr lit-int))))
+(test-judgment-holds 
+ (well-typed-prog ((fun (stmt (return (var z))) : int -> int) •)
+                  (stmt (expr (app (var z) lit-int)))))
+(test-judgment-holds 
+ (well-typed-prog ((fun (stmt (return (& (var (s (s z)))))) : int -> (* int)) 
+                   ((var lit-int : int) •))
+                  (stmt (expr (* (app (var z) lit-int))))))
+(test-judgment-holds 
+ (well-typed-prog ((var lit-int : int) 
+                   ((fun (stmt (return (& (var (s z))))) : int -> (* int)) •))
+                  (stmt (expr (* (app (var (s z)) lit-int))))))
+(test-judgment-holds 
+ (well-typed-prog ((fun (stmt (return (app (var (s z)) (var z)))) : int -> int) •)
+                  (stmt (expr (app (var z) lit-int)))))
+(test-judgment-holds 
+ (well-typed-prog ((fun (stmt (return (app (var (s (s z))) (var z)))) : int -> int)
+                   ((fun (stmt (return (app (var (s z)) (var z)))) : int -> int) •))
+                  (stmt (expr (app (var z) lit-int)))))
 
 ; seq statements
 (test-judgment-holds (typeof-stmt • (seq (expr lit-int) (return lit-int)) int))

@@ -1,12 +1,9 @@
 #lang racket
 
-(require "../../predicates.rkt")
+(require "../../main.rkt")
 (provide well-typed-prog
          typeof-stmt
-         typeof-expr
-         
-         defs-have-types
-         types-of-defs)
+         typeof-expr)
 
 ;; p ::= (ds b)
 ;; ds ::= • | (d ds)
@@ -48,7 +45,7 @@
 (define-predicate
   [(defs-have-types (? Γ) •)
    "no-def-has-type"]
-  [(typeof-block (? b) ((? t1) (? Γ)) (? t2))
+  [(typeof-block ((? t1) (? Γ)) (? b) (? t2))
    (defs-have-types (? Γ) (? ds))
    (defs-have-types
     (? Γ)
