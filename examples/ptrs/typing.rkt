@@ -1,9 +1,7 @@
 #lang racket
 
 (require "../../main.rkt")
-(provide well-typed-prog
-         typeof-stmt
-         typeof-expr)
+(provide (all-defined-out))
 
 ;; p ::= (ds b)
 ;; ds ::= • | (d ds)
