@@ -158,6 +158,14 @@ The default value for @racket[solver] solves no goals.
          (generate (p (? x)) 1))]
 }
 
+@defparam[current-permutations permuter (-> list? list?)]{
+The @racket[permuter] procedure determines the order in which @racket[generate]
+considers rules and attempts to establish premises. The procedure receives
+lists of (opaque) rules/premises and returns them in the order in which they
+should be used. The procedure's default value returns a random permutation. 
+Supplying the identity function makes @racket[generate] behave like Prolog.
+}                                                                         
+                                                                         
 @defparam[revisit-solved-goals? revisit? boolean?]{
 When @racket[revisit?] is non-@racket[false] (the default), @racket[generate] backtracks on 
 decisions that lead to solved goals if it later fails to solve subsequent goals.
