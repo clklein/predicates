@@ -43,11 +43,15 @@
 ;          (neq (s (? x)) (s (? y)))
 ;          "neq-ss"]
 ;
-;         The problem is the `neq' predicate, we can never conclude that two uninstantiated
-;         variables are not equal. We'd like to make that conclusion, for example, to generate 
-;         λx.λy.x at type α -> β -> α, but at the point that the generator tries to show
-;         that x can be chosen to have type α, both x and y are totally uninstantiated, 
-;         preventing it from skipping y's binding using the "bound-continue" rule.
+;         The problem is with the `neq' rules. These rules allow infinitely many ways to show 
+;         (neq x y) when x and y are totally uninstantiated, thus introducing infinitely many
+;         backtracking points for subsequent failures. If we're working with a size/depth 
+;         bound, these backtracking points can be a performance problem. Without a bound, they 
+;         can cause non-termination where you might not expect it. For example, 
+;
+;         (bound (? x) ([(? y) num] •) num)
+;
+;         will loop we try the `neq' premise of "bound-continue" before the `bound' premise.
 ;
 ;      b. It's nice that the generator doesn't bother, for example, to produce both λx.x and λy.y.
 
