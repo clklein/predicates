@@ -10,5 +10,5 @@
                   (λ (predicate term constraints)
                     (displayln "Failure:")
                     (pretty-print (cons (object-name predicate) term))
-                    #f)])7
-    (generate (typeof-expr (? Γ) (? e) (? t)) 10)))
+                    #f)])
+    (generate (typeof-expr (? Γ) (? e) (? t)) 100)))

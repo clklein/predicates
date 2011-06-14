@@ -19,7 +19,10 @@
 ; It also replacing De Bruijn indices with concrete names to make the results prettier.
 
 (provide random-arrow
-         main)
+         main
+         bound-measure
+         user-goal-solver
+         generate-base)
 
 (define (main . args)
   (define seed (add1 (random (sub1 (expt 2 31)))))
@@ -93,13 +96,15 @@
    (for ([_ (in-range samples)])
      (pretty-display (random-arrow size)))))
 
-(define (generate-base pred term env)
-  (cond [(equal? pred typeof)
-         (match term
-           [(list Γ (lvar x) τ)
-            (let-values ([(e env’) (generate-base-type Γ τ env)])
-              (hash-set env’ x e))])]
-        [else #f]))
+(define (generate-base pred term csts)
+  (let ([env (cstrs-eqs csts)])
+    (cond [(equal? pred typeof)
+           (match term
+             [(list Γ (lvar x) τ)
+              (let-values ([(e env’) (generate-base-type Γ τ env)])
+                (struct-copy cstrs csts [eqs (hash-set env’ x e)]))])]
+          [else #f])))
+
 
 (define (generate-base-type Γ τ env)
   (match τ
