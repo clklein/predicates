@@ -179,35 +179,35 @@
   ; revists a choice that instantiates a variable in an dead-end way
   (parameterize ([current-permutations
                   (make-permutations
-                 '(; only r1 rule
-                   (0)
-                   ; premises left to right
-                   (0 1)
-                   
-                   ; r2a first
-                   (0 1)
-                   ; only premise
-                   (0)
-                   ; only eq rule
-                   (0)
-                   ; no premises
-                   ()
-                   
-                   ; only r3 rule
-                   (0)
-                   ; fail
-                   
-                   ; only r2b premise
-                   (0)
-                   ; only eq rule
-                   (0)
-                   ; no premises
-                   ()
-                   
-                   ; only r3 rule
-                   (0)
-                   ; no premises
-                   ()))])
+                   '(; only r1 rule
+                     (0)
+                     ; premises left to right
+                     (0 1)
+                     
+                     ; r2a first
+                     (0 1)
+                     ; only premise
+                     (0)
+                     ; only eq rule
+                     (0)
+                     ; no premises
+                     ()
+                     
+                     ; only r3 rule
+                     (0)
+                     ; fail
+                     
+                     ; only r2b premise
+                     (0)
+                     ; only eq rule
+                     (0)
+                     ; no premises
+                     ()
+                     
+                     ; only r3 rule
+                     (0)
+                     ; no premises
+                     ()))])
     (check-not-false (generate (r1 (? x)) +inf.0)))
   
   ; same example without reconsidering the r2 derivation
@@ -306,7 +306,7 @@
                     (and (equal? p q)
                          (match t
                            [(list 'a (lvar y))
-                            (hash-set e y 'b)])))])
+                            (cstrs (hash-set (cstrs-eqs e) y 'b) (cstrs-dqs e))])))]) ; expose eqs/dqs to user goals?
     (check-equal? (generate (p (? x)) 1) '((x b)))))
 
 (let ()
@@ -320,16 +320,22 @@
   (check-equal? (generate (r (? ,'y)) +inf.0)
                 '((y a))))
 
+(define (solve0 t u e)
+  (let ([res (unify t u (cstrs e '()))])
+    (and res
+         (cstrs-eqs res))))
+
 (define-syntax (test-solve stx)
   (syntax-case stx ()
     [(_ t u e e’)
      (quasisyntax/loc stx
        (check-equal? 
-        (cond [(solve `t `u (make-immutable-hash `e)) => table]
+        (cond [(solve0 `t `u (make-immutable-hash `e)) => table]
               [else #f])
         #,(syntax-case #'e’ ()
             [#f #'#f]
             [_ #`(table (make-immutable-hash `e’))])))]))
+
 
 (test-solve 1 1 ((x . 3)) ((x . 3)))
 (test-solve 1 2 () #f)
@@ -373,3 +379,79 @@
             (cons ,(lvar 'y) (cons ,(lvar 'z) (cons 0 1)))
             ()
             #f)
+
+(define (c-table c)
+  (list
+   (sort (dict-map (cstrs-eqs c) cons)
+         string<=?
+         #:key (curry format "~s"))
+   (sort (cstrs-dqs c)
+         string<=?
+         #:key (curry format "~s"))))
+
+(define-syntax (test-unify stx)
+  (syntax-case stx ()
+    [(_ t u c c’)
+     (quasisyntax/loc stx
+       (check-equal? 
+        (cond [(unify `t `u (cstrs (make-immutable-hash (car `c)) (cdr `c))) => c-table]
+              [else #f])
+        #,(syntax-case #'c’ ()
+            [#f #'#f]
+            [_ #`(c-table (cstrs (make-immutable-hash (car `c’)) (cdr `c’)))])))]))
+
+(define-syntax (test-disunify stx)
+  (syntax-case stx ()
+    [(_ t u c c’)
+     (quasisyntax/loc stx
+       (check-equal? 
+        (cond [(disunify `t `u (cstrs (make-immutable-hash (car `c)) (cdr `c))) => c-table]
+              [else #f])
+        #,(syntax-case #'c’ ()
+            [#f #'#f]
+            [_ #`(c-table (cstrs (make-immutable-hash (car `c’)) (cdr `c’)))])))]))
+
+(test-disunify 1 2 (() . ()) (() . ()))
+(test-disunify 1 ,(lvar 'x) (() . ()) (() . (((,(lvar 'x))(1)))))
+(test-disunify ,(lvar 'x) 1 (((x . 1)) . (() ())) #f)
+(test-disunify (cons 1 2) (cons 1 3) (() . ()) (() . ()))
+(test-disunify ,(lvar 'x) 4 
+               (((x . ,(lvar 'y)) (y . 3)) . ()) 
+               (((x . ,(lvar 'y)) (y . 3)) . ()))
+(test-disunify ,(lvar 'x) 3
+               (((x . ,(lvar 'y)) (y . 3)) . ())
+               #f)
+(test-disunify 1 ,(lvar 'z)
+               ( ((x . ,(lvar 'y)) (y . (,(lvar 'y) ,(lvar 'z)))) . ( ((,(lvar 'y) ,(lvar 'z)) (2 2)) ) )
+               ( ((x . ,(lvar 'y)) (y . (,(lvar 'y) ,(lvar 'z)))) . ( ((,(lvar 'z)) (1)) ) ))
+(test-disunify 1 ,(lvar 'z)
+               ( ((x . ,(lvar 'y)) (y . (,(lvar 'x) ,(lvar 'z)))) . ( ((,(lvar 'y) ,(lvar 'y)) (2 1)) ) )
+               ( ((x . ,(lvar 'y)) (y . (,(lvar 'x) ,(lvar 'z)))) . ( ((,(lvar 'z)) (1)) ) ))
+
+(test-unify 1 ,(lvar 'x) 
+            ( () . (((,(lvar 'x))(1))) ) 
+            #f)
+(test-unify ,(lvar 'x) 3
+            (((x . ,(lvar 'y)) (y . 3)) . ())
+            (((x . 3) (y . 3)) . ()))
+
+(let ()
+  (define-predicate
+    [(not-in (? x) ())
+     "not-in-empty"]
+    [(not-in (? x) (? l))
+     (neq (? x) (? y))
+     (not-in (? x) ((? y) (? l)))
+     "not-in-list"])
+  
+  (check-equal?
+   (generate (not-in a (a (b (c ())))) +inf.0)
+   #f)
+  
+  (check-equal?
+   (generate (not-in d (a (b (c ())))) +inf.0)
+   '())
+  
+  (check-equal?
+   (generate (not-in c (a (b (c ())))) +inf.0)
+   #f))
