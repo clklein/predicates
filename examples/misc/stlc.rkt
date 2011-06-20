@@ -4,7 +4,7 @@
          rackunit
          redex/reduction-semantics)
 
-;; e ::= (λ (x t) e) | (e e) | (var x]
+;; e ::= (λ (x t) e) | (app e e) | (var x)
 ;;       | (if e then e else e) | true | false
 ;; t ::= bool | (t -> t)
 ;; env ::= () | ((x t) env)
@@ -21,23 +21,47 @@
    "typeof-if"]
   [(typeof-e (? env) (? e1) ((? t1) -> (? t2)))
    (typeof-e (? env) (? e2) (? t1))
-   (typeof-e (? env) ((? e1) (? e2)) (? t2))
+   (typeof-e (? env) (app (? e1) (? e2)) (? t2))
    "typeof-application"]
-  [(typeof-e (((? x) (? t)) (? env)) (var (? x)) (? t))
+  [(typeof-var (? env) (? x) (? t))
+   (typeof-e (? env) (var (? x)) (? t))
    "typeof-var"]
-  [(typeof-e (? env) (var (? y)) (? t))
-   (neq (? x) (? y))
-   (typeof-e (((? x) (? t1)) (? env)) (var (? y)) (? t))
-   "typeof-var-keep-looking"]
   [(typeof-e (((? x) (? t1)) (? env)) (? e) (? t2))
    (typeof-e (? env) (λ ((? x) (? t1)) (? e)) ((? t1) -> (? t2)))
    "typeof-abstraction"])
 
+(define-predicate
+  [(typeof-var (((? x) (? t)) (? env)) (? x) (? t))
+   "found-var"]
+  [(typeof-var (? env) (? y) (? t))
+   (neq (? x) (? y))
+   (typeof-var (((? x) (? t1)) (? env)) (? y) (? t))
+   "keep-looking"])
+
 (define (generate-base pred term csts)
-  (match term
-    [(list E (lvar x) t)
-     (let-values ([(e new-eqs) (generate-base-type E t (cstrs-eqs csts))])
-       (struct-copy cstrs csts [eqs (hash-set new-eqs x e)]))]
+  (cond [(eq? pred typeof-e)
+         (match term
+           [(list E (lvar x) t) 
+            (let-values ([(e new-eqs) (generate-base-type E t (cstrs-eqs csts))])
+              (struct-copy cstrs csts [eqs (hash-set new-eqs x e)]))]
+           [else #f])]
+        [(eq? pred typeof-var)
+         (match term
+           [(list E (lvar x) t)
+            (let ([var (var-search E t)]
+                  [eqs (cstrs-eqs csts)])
+              (if var
+                  (struct-copy cstrs csts [eqs (if (equal? x var) eqs (hash-set eqs var (lvar x)))])
+                  #f))]
+           [else #f])]
+        [else (error 'generate-base "unexpected pred ~s" pred)]))
+
+(define (var-search E t)
+  (define (t? a-t) (equal? t a-t))
+  (match E
+    [`((,(lvar y) ,(? t? x-t)) ,etc) 
+       y]
+    [`((,y ,some-t) ,etc) (var-search etc t)]
     [else #f]))
 
 (define (generate-base-type E t cs)
@@ -45,16 +69,25 @@
     ['bool
      (values (vector-ref (list->vector '(true false)) (random 2)) cs)]
     [(lvar t)
-     (let ([x (lvar (gensym 'x))])
-       (values x (hash-set cs t 'bool)))]
+     (values 'true (hash-set cs t 'bool))]
     [`(,a -> ,b)
      (let ([x (lvar (gensym 'x))])
        (let-values ([(e cs-e) (generate-base-type `((,x ,a) E) b cs)])
          (values `(λ (,x ,a) ,e) cs-e)))]))
 
 (define (generate-lambda size)
-  (generate (typeof-e () (? e) bool) size))
+  (parameterize ([user-goal-solver generate-base])
+    (generate (typeof-e () (? e) (? t)) size)))
      
+(define (generates-well-typed? size tries)
+  (for/and ([_ (in-range tries)])
+    (match (generate-lambda size)
+      [`((t ,t) (e ,e))
+       (unless (generate (typeof-e () ,e ,t) +inf.0)
+         (pretty-print e)
+         (pretty-print t)
+         false)])))
+
 (check-equal?
  (generate (typeof-e () (λ ((? x) bool) (? x)) bool) 10)
  #f)
@@ -64,11 +97,11 @@
  #f)
 
 (check-equal?
- (generate (typeof-e () ((λ ((? x) bool) (if (? x) then (? x) else false)) false) (bool -> bool)) 10)
+ (generate (typeof-e () (app (λ ((? x) bool) (if (? x) then (? x) else false)) false) (bool -> bool)) 10)
  #f)
 
 (check-not-equal?
- (generate (typeof-e () ((λ ((? x) bool) (if (? x) then true else false)) false) bool) 10)
+ (generate (typeof-e () (app (λ ((? x) bool) (if (? x) then true else false)) false) bool) 10)
  #f)
 
 (check-equal?
@@ -89,5 +122,9 @@
 
 ; the money test
 (check-equal?
- (generate (typeof-e () (λ ((? x) (bool -> bool)) (λ ((? x) bool) ((var (? x)) true))) (? t)) 10)
+ (generate (typeof-e () (λ ((? x) (bool -> bool)) (λ ((? x) bool) (app (var (? x)) true))) (? t)) 10)
+ #f)
+
+(check-not-equal? 
+ (generates-well-typed? 5 100) 
  #f)
