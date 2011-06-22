@@ -4,6 +4,10 @@
          rackunit
          redex/reduction-semantics)
 
+(provide generate-boolean
+         generate-lambda
+         fixup-vars)
+
 ;; e ::= (λ (x t) e) | (app e e) | (var x)
 ;;       | (if e then e else e) | true | false
 ;; t ::= bool | (t -> t)
@@ -78,15 +82,35 @@
 (define (generate-lambda size)
   (parameterize ([user-goal-solver generate-base])
     (generate (typeof-e () (? e) (? t)) size)))
+
+(define (generate-boolean size)
+  (parameterize ([user-goal-solver generate-base])
+    (fixup-vars (generate (typeof-e () (? e) bool) size))))
      
 (define (generates-well-typed? size tries)
   (for/and ([_ (in-range tries)])
-    (match (generate-lambda size)
-      [`((t ,t) (e ,e))
+    (match (fixup-vars (generate-lambda size))
+      [`( (e ,e) (t ,t))
        (unless (generate (typeof-e () ,e ,t) +inf.0)
          (pretty-print e)
          (pretty-print t)
          false)])))
+
+(define (fixup-vars exp)
+  (let ([vars (hash)]
+        [var-inc 0])
+    (define (new-var sym)
+      (let ([prefix (substring (symbol->string sym) 0 1)])
+        (set! vars (hash-set vars sym (string->symbol (string-append prefix "_" (number->string var-inc)))))
+        (set! var-inc (+ var-inc 1))
+        (hash-ref vars sym)))
+    (let recur ([e exp])
+      (match e
+        [(lvar x)
+         (hash-ref vars x (lambda () (new-var x)))]
+        [`(,es ...)
+         (for/list ([e es]) (recur e))]
+        [else e]))))
 
 (check-equal?
  (generate (typeof-e () (λ ((? x) bool) (? x)) bool) 10)

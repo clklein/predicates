@@ -405,7 +405,7 @@
     [(_ t u c c’)
      (quasisyntax/loc stx
        (check-equal? 
-        (cond [(disunify `t `u (cstrs (make-immutable-hash (car `c)) (cdr `c))) => c-table]
+        (cond [(disunify `t `u (check-and-resimplify (cstrs (make-immutable-hash (car `c)) (cdr `c)))) => c-table]
               [else #f])
         #,(syntax-case #'c’ ()
             [#f #'#f]

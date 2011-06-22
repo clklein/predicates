@@ -166,17 +166,18 @@
     (cond
       [(or (empty? dqs-notok) (empty? (car dqs-notok)))
        cs]
-      [(hash-has-key? (cstrs-eqs cs) (lvar-id (caaar dqs-notok)))
-       ;; resimplifying currently causes infinite looping
-       (disunify (caar dqs-notok) (cadar dqs-notok) (struct-copy cstrs cs
-                                                                 [dqs (append (cdr dqs-notok) dqs-ok)]))]
+      [(hash-has-key? (cstrs-eqs cs) (lvar-id (match dqs-notok [`(((,v1 ,vs ...)(,t1 ,ts ...)) ,etc ...) v1])))
+       (match dqs-notok
+         [`((,vars ,terms) ,etc ...)
+          (disunify vars terms (struct-copy cstrs cs
+                                            [dqs (append (cdr dqs-notok) dqs-ok)]))])]
       [else
        (loop (cdr dqs-notok) (cons (first dqs-notok) dqs-ok))])))
 
 
 ;; term term cstrs -> (or/c cstrs #f)
 (define (disunify t u cs-in)
-  (let* ([cs cs-in #|(check-and-resimplify cs-in)|#] ;; what if we end up here during a resimplification?
+  (let* ([cs cs-in #|(check-and-resimplify cs-in)|#] ;; don't think we need to resimplify here
          [res (solve t u (cstrs-eqs cs))])
     (cond
       [(not res) cs]
