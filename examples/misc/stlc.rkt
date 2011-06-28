@@ -13,6 +13,7 @@
 ;; t ::= bool | (t -> t)
 ;; env ::= () | ((x t) env)
 
+
 (define-predicate
   [(typeof-e (? env) true bool)
    "typeof-true"]
@@ -43,6 +44,7 @@
    "keep-looking"])
 
 (define (generate-base pred term csts)
+  ;(display term)
   (cond [(eq? pred typeof-e)
          (match term
            [(list E (lvar x) t) 
@@ -113,42 +115,42 @@
         [else e]))))
 
 (check-equal?
- (generate (typeof-e () (λ ((? x) bool) (? x)) bool) 10)
+ (generate (typeof-e () (λ ((? x) bool) (var (? x))) bool) +inf.0)
  #f)
 
 (check-not-equal?
- (generate (typeof-e () (λ ((? x) bool) (? x)) (bool -> bool)) 10)
+ (generate (typeof-e () (λ (x bool) (var x)) (bool -> bool)) +inf.0)
  #f)
 
 (check-equal?
- (generate (typeof-e () (app (λ ((? x) bool) (if (? x) then (? x) else false)) false) (bool -> bool)) 10)
+ (generate (typeof-e () (app (λ ((? x) bool) (if (var (? x)) then (var (? x)) else false)) false) (bool -> bool)) +inf.0)
  #f)
 
 (check-not-equal?
- (generate (typeof-e () (app (λ ((? x) bool) (if (? x) then true else false)) false) bool) 10)
+ (generate (typeof-e () (app (λ ((? x) bool) (if (var (? x)) then true else false)) false) bool) +inf.0)
  #f)
 
 (check-equal?
- (generate (typeof-e () ((λ ((? y) (bool)) ((? y) true)) true) (? t)) 5)
+ (generate (typeof-e () ((λ ((? y) (bool)) ((var (? y)) true)) true) (? t)) +inf.0)
  #f)
 
 (check-not-equal?
- (generate (typeof-e ((x bool) ()) (var x) bool) 5)
+ (generate (typeof-e ((x bool) ()) (var x) bool) +inf.0)
  #f)
 
 (check-equal?
- (generate (typeof-e ((x (bool-> bool)) ((x bool) ())) (var x) bool) 5)
+ (generate (typeof-e ((x (bool-> bool)) ((x bool) ())) (var x) bool) +inf.0)
  #f)
 
 (check-equal?
- (generate (typeof-e () (λ ((? x) bool) true) (bool -> (bool -> bool))) 5)
+ (generate (typeof-e () (λ ((? x) bool) true) (bool -> (bool -> bool))) +inf.0)
  #f)
 
 ; the money test
 (check-equal?
- (generate (typeof-e () (λ ((? x) (bool -> bool)) (λ ((? x) bool) (app (var (? x)) true))) (? t)) 10)
+ (generate (typeof-e () (λ ((? x) (bool -> bool)) (λ ((? x) bool) (app (var (? x)) true))) (? t)) +inf.0)
  #f)
 
-(check-not-equal? 
- (generates-well-typed? 5 100) 
+(check-not-equal?
+ (generates-well-typed? 5 100)
  #f)
