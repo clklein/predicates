@@ -33,7 +33,8 @@
    "typeof-var"]
   [(typeof-e (((? x) (? t1)) (? env)) (? e) (? t2))
    (typeof-e (? env) (λ ((? x) (? t1)) (? e)) ((? t1) -> (? t2)))
-   "typeof-abstraction"])
+   "typeof-abstraction"]
+  (bounding-rules "typeof-true" "typeof-false" "typeof-var" "typeof-abstraction" "typeof-application" "typeof-if"))
 
 (define-predicate
   [(typeof-var (((? x) (? t)) (? env)) (? x) (? t))
@@ -41,7 +42,8 @@
   [(typeof-var (? env) (? y) (? t))
    (neq (? x) (? y))
    (typeof-var (((? x) (? t1)) (? env)) (? y) (? t))
-   "keep-looking"])
+   "keep-looking"]
+  (bounding-rules "found-var" "keep-looking"))
 
 (define (generate-base pred term csts)
   ;(display term)
@@ -146,7 +148,6 @@
  (generate (typeof-e () (λ ((? x) bool) true) (bool -> (bool -> bool))) +inf.0)
  #f)
 
-; the money test
 (check-equal?
  (generate (typeof-e () (λ ((? x) (bool -> bool)) (λ ((? x) bool) (app (var (? x)) true))) (? t)) +inf.0)
  #f)
