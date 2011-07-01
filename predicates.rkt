@@ -128,14 +128,20 @@
                  (syntax->list rules)))))))
 
 (define-for-syntax (order-rules rules b-rules)
-  (let ([b-rs (list->vector (syntax->datum b-rules))])
+  (let* ([b-rs (list->vector (syntax->datum b-rules))]
+         [rs (filter
+                 (lambda (r)
+                   (match (syntax->datum r)
+                     [`(,premises ,conclusion ,rule-name ,def-form)
+                      (vector-member rule-name b-rs)]))
+                 (syntax->list rules))])
     #`#,(cons #'list
               (map
                (lambda (b-r)
                  (syntax-case b-r ()
                    [(premises ... conclusion rule-name def-form)
                     #'(make-rule premises ... conclusion rule-name instantiations def-form)]))
-               (sort (syntax->list rules)
+               (sort rs
                      <
                      #:key (lambda (r)
                              (match (syntax->datum r)
@@ -152,12 +158,13 @@
             [else #f]))
         (order-rules rules b-rules)
         (filter-rules rules b-rules))))
-  
+
 (define-syntax (define-predicate stx)
   (syntax-case stx (bounding-rules)
     [(def-form (premises ... conclusion rule-name) ... (bounding-rules b-rules ... ))
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
-       (let ([bounding-rules-exp (bounding-rules-syntax #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
+       (let ([bounding-rules (filter-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))]
+             [bounding-rules-ordered (order-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
          #`(define (name term env bound succ fail)
              (define instantiations (make-hash))
              (cond 
@@ -170,7 +177,13 @@
                     ['() (fail)]
                     [(cons r rs)
                      (r term env bound succ (λ () (loop rs)))]))]
-               [else (let loop ([rules #,bounding-rules-exp])
+               [(order-bounding-rules?)
+                (let loop ([rules #,bounding-rules-ordered])
+                       (match rules
+                         ['() (fail)]
+                         [(cons r rs)
+                          (r term env bound succ (λ () (loop rs)))]))]
+               [else (let loop ([rules #,bounding-rules])
                        (match rules
                          ['() (fail)]
                          [(cons r rs)
@@ -205,6 +218,8 @@
           [else t])))
      
 (define user-goal-solver (make-parameter (λ (pred term env) #f)))
+
+(define order-bounding-rules? (make-parameter #t))
 
 ;; term ::= atom | (lvar symbol) | (listof term)
 ;; env ::= (dict/c symbol term)
