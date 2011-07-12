@@ -111,14 +111,16 @@
                           (arr (? α) (? β))))
    "loop")
   ((typeof (? Γ) init (-> (? α) (arr (? α) (? α))))
-   "init"))
+   "init")
+  (bounding-rules "arr" "unit" "number" "+" "abs" "init" "var" "pair" "app"))
 
 (define-predicate
   ((bound z ((? τ) (? Γ)) (? τ))
    "bound-eq")
   ((bound (? x) (? Γ) (? τ))
    (bound (s (? x)) ((? σ) (? Γ)) (? τ))
-   "bound-neq"))
+   "bound-neq")
+  (bounding-rules "bound-eq" "bound-neq"))
 
 (define (to-type-form expr [env '()])
   (define (to-peano n)
