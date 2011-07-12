@@ -23,7 +23,9 @@
          cstrs-eqs
          cstrs-dqs
          check-and-resimplify
-         neq)
+         neq
+         order-bounding-rules?
+         debug-out?)
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
@@ -84,32 +86,41 @@
 (define (unbounded-predicate? pred)
   (member pred (unbounded-predicates)))
 
+(define debug-out? (make-parameter #f))
+
+
 (define-syntax (make-rule stx)
   (syntax-case stx ()
     [(_ ((prem-name . prem-body) ...) (conc-name . conc-body) rule-name instantiations def-form)
      #`(λ (term env bound succ fail)
+         (define (show-state term state)
+           (printf "~a: ~a, ~s : ~s, ~s\n" rule-name state term (valuation (make-term `conc-body instantiations) env) bound))
          (match (unify term (make-term `conc-body instantiations) env)
-           [#f (fail)]
-           [env (let loop ([ps ((current-permutations)
-                                (list (list prem-name (make-term `prem-body instantiations))
-                                      ...))]
-                           [env env]
-                           [bound bound]
-                           [fail fail])
-                  (match ps
-                    ['() (succ env bound fail)]
-                    [(cons (list p b) ps’)
-                     (p b env 
-                        (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
-                        (λ (env bound’ fail’) 
-                          (loop ps’ env 
-                                (match (bound-measure)
-                                  ['depth bound]
-                                  ['size bound’])
-                                (if (revisit-solved-goals?)
-                                    fail’
-                                    fail)))
-                        fail)]))]))]))
+           [#f 
+            (when (debug-out?) (show-state (valuation term env) "fail")) 
+            (fail)]
+           [env 
+            (when (debug-out?) (show-state (valuation term env) "succ"))
+            (let loop ([ps ((current-permutations)
+                            (list (list prem-name (make-term `prem-body instantiations))
+                                  ...))]
+                       [env env]
+                       [bound bound]
+                       [fail fail])
+              (match ps
+                ['() (succ env bound fail)]
+                [(cons (list p b) ps’)
+                 (p b env 
+                    (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
+                    (λ (env bound’ fail’) 
+                      (loop ps’ env 
+                            (match (bound-measure)
+                              ['depth bound]
+                              ['size bound’])
+                            (if (revisit-solved-goals?)
+                                fail’
+                                fail)))
+                    fail)]))]))]))
 
 (define-for-syntax (filter-rules rules b-rules)
   (let ([b-rs (syntax->datum b-rules)])
@@ -149,16 +160,6 @@
                                 (vector-member rule-name b-rs)]
                                [else #f])))))))
 
-(define-for-syntax (bounding-rules-syntax rules b-rules)
-  (let ([b-rs (syntax->datum b-rules)])
-    (if (for/and ([r (syntax->datum rules)])
-          (match r
-            [`(,premises ,conclusion ,rule-name ,def-form)
-             (member rule-name b-rs)]
-            [else #f]))
-        (order-rules rules b-rules)
-        (filter-rules rules b-rules))))
-
 (define-syntax (define-predicate stx)
   (syntax-case stx (bounding-rules)
     [(def-form (premises ... conclusion rule-name) ... (bounding-rules b-rules ... ))
@@ -179,15 +180,16 @@
                      (r term env bound succ (λ () (loop rs)))]))]
                [(order-bounding-rules?)
                 (let loop ([rules #,bounding-rules-ordered])
-                       (match rules
-                         ['() (fail)]
-                         [(cons r rs)
-                          (r term env bound succ (λ () (loop rs)))]))]
-               [else (let loop ([rules #,bounding-rules])
-                       (match rules
-                         ['() (fail)]
-                         [(cons r rs)
-                          (r term env bound succ (λ () (loop rs)))]))]))))]
+                  (match rules
+                    ['() (fail)]
+                    [(cons r rs)
+                     (r term env bound succ (λ () (loop rs)))]))]
+               [else 
+                (let loop ([rules #,bounding-rules])
+                  (match rules
+                    ['() (fail)]
+                    [(cons r rs)
+                     (r term env bound succ (λ () (loop rs)))]))]))))]
     [(def-form (premises ... conclusion rule-name) ... )
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        #`(define (name term env bound succ fail)
