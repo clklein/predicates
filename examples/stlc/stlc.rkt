@@ -9,7 +9,7 @@
          fixup-vars)
 
 ;; e ::= (λ (x t) e) | (app e e) | (var x)
-;;       | (if e then e else e) | true | false
+;;       | (if0 e e e) | true | false
 ;; t ::= bool | (t -> t)
 ;; env ::= () | ((x t) env)
 
@@ -22,7 +22,7 @@
   [(typeof-e (? env) (? e1) bool)
    (typeof-e (? env) (? e2) (? t))
    (typeof-e (? env) (? e3) (? t))
-   (typeof-e (? env) (if (? e1) then (? e2) else (? e3)) (? t))
+   (typeof-e (? env) (if0 (? e1) (? e2) (? e3)) (? t))
    "typeof-if"]
   [(typeof-e (? env) (? e1) ((? t1) -> (? t2)))
    (typeof-e (? env) (? e2) (? t1))
@@ -34,7 +34,7 @@
   [(typeof-e (((? x) (? t1)) (? env)) (? e) (? t2))
    (typeof-e (? env) (λ ((? x) (? t1)) (? e)) ((? t1) -> (? t2)))
    "typeof-abstraction"]
-  (bounding-rules "typeof-true" "typeof-false" "typeof-var" "typeof-abstraction" "typeof-application" "typeof-if"))
+  [bounding-rules "typeof-true" "typeof-var" "typeof-abstraction"])
 
 (define-predicate
   [(typeof-var (((? x) (? t)) (? env)) (? x) (? t))
@@ -43,10 +43,9 @@
    (neq (? x) (? y))
    (typeof-var (((? x) (? t1)) (? env)) (? y) (? t))
    "keep-looking"]
-  (bounding-rules "found-var" "keep-looking"))
+  [bounding-rules "found-var" "keep-looking"])
 
 (define (generate-base pred term csts)
-  ;(display term)
   (cond [(eq? pred typeof-e)
          (match term
            [(list E (lvar x) t) 
@@ -94,7 +93,7 @@
 (define (generates-well-typed? size tries)
   (for/and ([_ (in-range tries)])
     (match (fixup-vars (generate-lambda size))
-      [`( (e ,e) (t ,t))
+      [`( (e ,e) (t ,t) )
        (unless (generate (typeof-e () ,e ,t) +inf.0)
          (pretty-print e)
          (pretty-print t)
@@ -125,11 +124,11 @@
  #f)
 
 (check-equal?
- (generate (typeof-e () (app (λ ((? x) bool) (if (var (? x)) then (var (? x)) else false)) false) (bool -> bool)) +inf.0)
+ (generate (typeof-e () (app (λ ((? x) bool) (if0 (var (? x)) (var (? x)) false)) false) (bool -> bool)) +inf.0)
  #f)
 
 (check-not-equal?
- (generate (typeof-e () (app (λ ((? x) bool) (if (var (? x)) then true else false)) false) bool) +inf.0)
+ (generate (typeof-e () (app (λ ((? x) bool) (if0 (var (? x)) true false)) false) bool) +inf.0)
  #f)
 
 (check-equal?
