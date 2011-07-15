@@ -4,7 +4,7 @@
          "stlc.rkt")
 
 ;; e ::= (λ (x t) e) | (app e e) | (var x)
-;;       | (if e then e else e) | true | false
+;;       | (if0 e e e) | true | false
 ;; t ::= bool | (t -> t)
 ;; env ::= () | ((x t) env)
 
@@ -12,8 +12,8 @@
   (match e
     ['true 'true]
     ['false 'false]
-    [`(if ,t then ,true else ,false)
-     (eval-if t true false)]
+    [`(if0 ,t ,true ,false)
+     (eval-if0 t true false)]
     [`(λ (,x ,t) ,ef)
      `(λ (,x ,t) ,ef)]
     [`(app ,f ,e1)
@@ -50,11 +50,11 @@
      (for/list ([e es]) (substitute x e-subst e))]
     [else e]))
 
-(define (eval-if test true false)
+(define (eval-if0 test true false)
   (match (eval-stlc test)
     ['true (eval-stlc true)]
     ['false (eval-stlc false)]
-    [else (error (format "Conditional in if didn't evaluate: ~s" test))]))
+    [else (error (format "Conditional in if0 didn't evaluate: ~s" test))]))
 
 (define (generate-eval-check n size)
   (for/and ([in-range n])
@@ -69,15 +69,13 @@
    
 
 (check-equal?
- (eval-stlc '(if true then true else false))
+ (eval-stlc '(if0 true true false))
  'true)
 
 (check-equal?
- (eval-stlc '(if
-             (if true then true else false)
-             then
-             (if false then false else true)
-             else
+ (eval-stlc '(if0
+             (if0 true true false)
+             (if0 false false true)
              false))
  'true)
 
@@ -86,22 +84,20 @@
  'true)
 
 (check-equal?
- (eval-stlc '(app (λ (x bool) (if (var x) then false else true)) true))
+ (eval-stlc '(app (λ (x bool) (if0 (var x) false true)) true))
  'false)
 
 (check-equal?
  (eval-stlc '(app 
               (app 
                (λ (x (bool -> bool)) (var x)) 
-               (λ (x bool) (if (var x) then true else false)))
+               (λ (x bool) (if0 (var x) true false)))
               true))
             'true)
 
 (check-equal?
- (eval-stlc '(app (if true 
-                      then 
-                      (λ (x_0 (t_1 -> t_1)) (app (λ (x_2 bool) (var x_2)) true)) 
-                      else 
+ (eval-stlc '(app (if0 true 
+                      (λ (x_0 (t_1 -> t_1)) (app (λ (x_2 bool) (var x_2)) true))
                       (λ (x_3 (t_1 -> t_1)) true)) (λ (x_4 t_1) (var x_4))))
             'true)
 
@@ -118,6 +114,22 @@
                true)
               true))
  'true)
+
+(check-exn
+ exn:fail?
+ (lambda () 
+   (eval-stlc '(app
+                (app
+                 (λ (y bool)
+                   (app
+                    (λ (x (bool -> bool))
+                      (λ (y bool)
+                        (app (var y) (var y))))
+                    (λ (x bool)
+                      (var y))))
+                 true)
+                true))))
+ 
                  
               
 (check-not-equal?

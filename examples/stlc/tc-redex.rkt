@@ -4,12 +4,12 @@
          "stlc.rkt")
 
 ;; e ::= (λ (x t) e) | (app e e) | (var x)
-;;       | (if e then e else e) | true | false
+;;       | (if0 e e e) | true | false
 ;; t ::= bool | (t -> t)
 ;; env ::= () | ((x t) env)
 
 (define-language λ-bool
-  (e (app e e) (var x) (if e then e else e) (λ (x t) e) true false)
+  (e (app e e) (var x) (if0 e e e) (λ (x t) e) true false)
   (t bool x (t -> t))
   (x variable-not-otherwise-mentioned))
 
@@ -19,7 +19,7 @@
    bool]
   [(tc false (x t) ...)
    bool]
-  [(tc (if e_1 then e_2 else e_3) (x t) ...)
+  [(tc (if0 e_1 e_2 e_3) (x t) ...)
    t_2
    (where bool (tc e_1 (x t) ...))
    (where t_2 (tc e_2 (x t) ...))
@@ -43,8 +43,8 @@
 (test-equal (term (tc (var x) (x bool) (x (bool -> bool)))) (term bool))
 (test-equal (term (tc (app (λ (x bool) (var x)) true))) (term bool))
 (test-equal (term (tc (app (λ (x bool) (var x)) (app true false)))) (term #f))
-(test-equal (term (tc (if true then true else false))) (term bool))
-(test-equal (term (tc (if true then true else (λ (x bool) (var x))))) (term #f))
+(test-equal (term (tc (if0 true true false))) (term bool))
+(test-equal (term (tc (if0 true true (λ (x bool) (var x))))) (term #f))
 
 (define (generate-type-check n size)
   (for/and ([in-range n])
