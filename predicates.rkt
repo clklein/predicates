@@ -29,9 +29,11 @@
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
-    (form-name (make-term `body visible) (cstrs (hash) '()) bound
-               (λ (env _1 _2) (solution visible env)) ;; dqs out?
-               (λ () #f))))
+    (with-continuation-mark 'tree-mark '()
+      (form-name (make-term `body visible) (cstrs (hash) '()) bound
+                 (λ (env _1 _2) (solution visible env)) ;; dqs out?
+                 (λ () #f)
+                 0))))
 
 (define (solution vars env)
   (hash-map vars (λ (x y) (list x (valuation (lvar y) env)))))
@@ -88,13 +90,26 @@
 
 (define debug-out? (make-parameter #f))
 
+(define (tree-mark)
+  (continuation-mark-set-first
+   (current-continuation-marks)
+   'tree-mark))
+
+(define (make-tree-mark n depth)
+  (let ([mark (tree-mark)])
+    (if mark
+        (append
+         (take mark depth)
+         (list n))
+        (list n))))
+        
 
 (define-syntax (make-rule stx)
   (syntax-case stx ()
     [(_ ((prem-name . prem-body) ...) (conc-name . conc-body) rule-name instantiations def-form)
-     #`(λ (term env bound succ fail)
+     #`(λ (term env bound succ fail depth)
          (define (show-state term state)
-           (printf "~a: ~a, ~s : ~s, ~s\n" rule-name state term (valuation (make-term `conc-body instantiations) env) bound))
+           (printf "~s, ~a: ~a, ~s : ~s, ~s, ~s\n" (take (tree-mark) depth) rule-name state term (valuation (make-term `conc-body instantiations) env) bound depth))
          (match (unify term (make-term `conc-body instantiations) env)
            [#f 
             (when (debug-out?) (show-state (valuation term env) "fail")) 
@@ -106,21 +121,25 @@
                                   ...))]
                        [env env]
                        [bound bound]
-                       [fail fail])
+                       [fail fail]
+                       [n 0])
               (match ps
                 ['() (succ env bound fail)]
                 [(cons (list p b) ps’)
-                 (p b env 
-                    (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
-                    (λ (env bound’ fail’) 
-                      (loop ps’ env 
-                            (match (bound-measure)
-                              ['depth bound]
-                              ['size bound’])
-                            (if (revisit-solved-goals?)
-                                fail’
-                                fail)))
-                    fail)]))]))]))
+                 (let ([mark (make-tree-mark n depth)])
+                 (with-continuation-mark 'tree-mark mark
+                     (p b env 
+                        (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
+                        (λ (env bound’ fail’) 
+                          (loop ps’ env 
+                                (match (bound-measure)
+                                  ['depth bound]
+                                  ['size bound’])
+                                (if (revisit-solved-goals?)
+                                    (lambda () (with-continuation-mark 'tree-mark mark (fail’)))
+                                    fail)
+                                (+ n 1)))
+                        fail (+ depth 1))))]))]))]))
 
 (define-for-syntax (filter-rules rules b-rules)
   (let ([b-rs (syntax->datum b-rules)])
@@ -166,8 +185,9 @@
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        (let ([bounding-rules (filter-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))]
              [bounding-rules-ordered (order-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
-         #`(define (name term env bound succ fail)
+         #`(define (name term env bound succ fail depth)
              (define instantiations (make-hash))
+             (define t-mark (tree-mark))
              (cond 
                [(or (positive? bound) 
                     (unbounded-predicate? name))
@@ -177,22 +197,22 @@
                   (match rules
                     ['() (fail)]
                     [(cons r rs)
-                     (r term env bound succ (λ () (loop rs)))]))]
+                     (r term env bound succ (λ () (loop rs)) depth)]))]
                [(order-bounding-rules?)
                 (let loop ([rules #,bounding-rules-ordered])
                   (match rules
                     ['() (fail)]
                     [(cons r rs)
-                     (r term env bound succ (λ () (loop rs)))]))]
+                     (r term env bound succ (λ () (loop rs)) depth)]))]
                [else 
                 (let loop ([rules #,bounding-rules])
                   (match rules
                     ['() (fail)]
                     [(cons r rs)
-                     (r term env bound succ (λ () (loop rs)))]))]))))]
+                     (r term env bound succ (λ () (loop rs)) depth)]))]))))]
     [(def-form (premises ... conclusion rule-name) ... )
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
-       #`(define (name term env bound succ fail)
+       #`(define (name term env bound succ fail depth)
            (define instantiations (make-hash))
            (cond 
              [(or (positive? bound) 
@@ -203,15 +223,21 @@
                 (match rules
                   ['() (fail)]
                   [(cons r rs)
-                   (r term env bound succ (λ () (loop rs)))]))]
+                   (r term env bound succ (λ () (loop rs)) depth)]))]
              [else (match ((user-goal-solver) name (make-user-goal term env) env)
                      [#f (fail)]
                      [env (succ env bound fail)])])))]))
     
-(define (neq term env bound succ fail)
+(define (neq term env bound succ fail depth)
+  (define (show-state term state)
+           (printf "~s, ~a: ~a, ~s , ~s, ~s\n" (take (tree-mark) depth) "neq" state term bound depth))
   (match (disunify (first term) (second term) env)
-           [#f (fail)]
-           [env (succ env bound fail)]))
+           [#f
+            (when (debug-out?) (show-state (valuation term env) "fail"))
+            (fail)]
+           [env
+            (when (debug-out?) (show-state (valuation term env) "succ"))
+            (succ env bound fail)]))
 
 (define (make-user-goal term env)
   (let substitute ([t term])
