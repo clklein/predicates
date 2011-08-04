@@ -25,10 +25,12 @@
          check-and-resimplify
          neq
          order-bounding-rules?
-         debug-out?)
+         debug-out?
+         gen-trace)
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
+    (gen-trace '())
     (with-continuation-mark 'tree-mark '()
       (form-name (make-term `body visible) (cstrs (hash) '()) bound
                  (λ (env _1 _2) (solution visible env)) ;; dqs out?
@@ -58,7 +60,8 @@
                       [(x . _) (free-id-table-set m #'x #t)]))
           (λ (k v) k))
     [(list name) name]
-    [names (raise-syntax-error (syntax-e def-form) "inconsistent form name" #f #f names)]))
+    [names
+     (raise-syntax-error (syntax-e def-form) "inconsistent form name" #f #f names)]))
 
 (define (make-term pre-term instantiations)
   (match pre-term
@@ -90,6 +93,8 @@
 
 (define debug-out? (make-parameter #f))
 
+(define gen-trace (make-parameter '()))
+
 (define (tree-mark)
   (continuation-mark-set-first
    (current-continuation-marks)
@@ -109,16 +114,16 @@
     [(_ ((prem-name . prem-body) ...) (conc-name . conc-body) rule-name instantiations def-form)
      #`(λ (term env bound succ fail depth)
          (define (show-state term state)
-           (printf "~s, ~a: ~a, ~s : ~s, ~s, ~s\n" (take (tree-mark) depth) rule-name state term (valuation (make-term `conc-body instantiations) env) bound depth))
+           (printf "~s, ~a: ~a, ~s : ~s, ~s, ~s\n" (take (tree-mark) depth) rule-name state (valuation term env) (valuation (make-term `conc-body instantiations) env) bound depth)
+           (gen-trace (append (gen-trace)
+                              (list (list (take (tree-mark) depth) rule-name state (valuation term env) (valuation (make-term `conc-body instantiations) env) bound depth)))))
          (match (unify term (make-term `conc-body instantiations) env)
            [#f 
             (when (debug-out?) (show-state (valuation term env) "fail")) 
             (fail)]
            [env 
             (when (debug-out?) (show-state (valuation term env) "succ"))
-            (let loop ([ps ((current-permutations)
-                            (list (list prem-name (make-term `prem-body instantiations))
-                                  ...))]
+            (let loop ([ps (rule-permutations (list (list prem-name (make-term `prem-body instantiations)) ...))]
                        [env env]
                        [bound bound]
                        [fail fail]
@@ -180,7 +185,7 @@
                                [else #f])))))))
 
 (define-syntax (define-predicate stx)
-  (syntax-case stx (bounding-rules)
+  (syntax-case stx (bounding-rules always-order)
     [(def-form (premises ... conclusion rule-name) ... (bounding-rules b-rules ... ))
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        (let ([bounding-rules (filter-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))]
@@ -210,6 +215,16 @@
                     ['() (fail)]
                     [(cons r rs)
                      (r term env bound succ (λ () (loop rs)) depth)]))]))))]
+    [(def-form (premises ... conclusion rule-name) ... (always-order b-rules ... ))
+     (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
+       (let ([bounding-rules-ordered (order-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
+       #`(define (name term env bound succ fail depth)
+           (define instantiations (make-hash))
+              (let loop ([rules #,bounding-rules-ordered])
+                  (match rules
+                    ['() (fail)]
+                    [(cons r rs)
+                     (r term env bound succ (λ () (loop rs)) depth)])))))]
     [(def-form (premises ... conclusion rule-name) ... )
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        #`(define (name term env bound succ fail depth)
@@ -344,10 +359,16 @@
 (define current-permutations
   (make-parameter random-permutation))
 
+;; derandomize rules without breaking tests
+(define (rule-permutations l)
+  (if (equal? current-permutations random-permutation)
+      l
+      ((current-permutations) l)))
+
 (define (make-permutations specs)
   (λ (list)
     (match specs
-      ['() (error 'make-permutations "out of permutations")]
+      ['() (error 'make-permutations "out of permutations")] 
       [(cons s ss)
        (unless (equal? (length s) (length list))
          (error 'make-permutations
