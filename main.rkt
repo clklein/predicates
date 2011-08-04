@@ -13,4 +13,5 @@
  [user-goal-solver (parameter/c (-> procedure? term/c (struct/c cstrs (hash/c symbol? term/c) list?)
                                     (or/c #f (struct/c cstrs (hash/c symbol? term/c) list?))))]
  [revisit-solved-goals? (parameter/c boolean?)]
- [current-permutations (parameter/c (-> list? list?))])
+ [current-permutations (parameter/c (-> list? list?))]
+ [debug-out? (parameter/c boolean?)])
