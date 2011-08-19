@@ -1,4 +1,8 @@
-This collection can be used by specifying its path, for example,
+This collection provides a syntax for inductively defined predicates
+(e.g., typing rules) and a tool for generating random objects that
+satisfy those predicates (e.g., typing derivations).
+
+The collection can be used by specifying its path, for example,
 
 (require "predicates/main.rkt")
 
