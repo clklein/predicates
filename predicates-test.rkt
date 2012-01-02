@@ -8,6 +8,8 @@
         string<=?
         #:key (curry format "~s")))
 
+(parameterize ([randomize-rules? #t])
+              
 (let ()
   (define-predicate
     [(plus z (? y) (? y))
@@ -265,6 +267,8 @@
                      ()))]
                  [revisit-solved-goals? #f])
     (check-not-false (generate (r1 b) +inf.0))))
+
+)
 
 ; unbounded-predicates
 (let ()
