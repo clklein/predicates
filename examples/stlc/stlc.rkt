@@ -97,6 +97,11 @@
        (unless (generate (typeof-e () ,e ,t) +inf.0)
          (pretty-print e)
          (pretty-print t)
+         false)]
+      [`( (t ,t) (e ,e) )
+       (unless (generate (typeof-e () ,e ,t) +inf.0)
+         (pretty-print e)
+         (pretty-print t)
          false)])))
 
 (define (fixup-vars exp)

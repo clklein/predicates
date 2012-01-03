@@ -34,7 +34,9 @@
     (gen-trace '())
     (with-continuation-mark 'tree-mark '()
       (form-name (make-term `body visible) (cstrs (hash) '()) bound
-                 (λ (env _1 _2) (solution visible env)) ;; dqs out?
+                 (λ (env _1 _2)
+                   (when (debug-out?) (printf "\n"))
+                   (solution visible env))
                  (λ () #f)
                  0))))
 
@@ -117,7 +119,8 @@
          (define (save-state term state)
            (printf ".")
            (gen-trace (append (gen-trace)
-                              (list (list (take (tree-mark) depth) rule-name state (valuation term env) (valuation (make-term `conc-body instantiations) env) bound depth)))))
+                              (list (list (take (tree-mark) depth) rule-name state (valuation term env) 
+                                          (valuation (make-term `conc-body instantiations) env) bound depth)))))
          (match (unify term (make-term `conc-body instantiations) env)
            [#f 
             (when (debug-out?) (save-state (valuation term env) "fail")) 
@@ -248,14 +251,17 @@
                      [env (succ env bound fail)])])))]))
     
 (define (neq term env bound succ fail depth)
-  (define (show-state term state)
-           (printf "~s, ~a: ~a, ~s , ~s, ~s\n" (take (tree-mark) depth) "neq" state term bound depth))
+  (define (save-state term state)
+           (printf ".")
+           (gen-trace (append (gen-trace)
+                              (list (list (take (tree-mark) depth) "neq" state (valuation term env) 
+                                          (valuation (make-term `conc-body (make-hash)) env) bound depth)))))
   (match (disunify (first term) (second term) env)
            [#f
-            (when (debug-out?) (show-state (valuation term env) "fail"))
+            (when (debug-out?) (save-state (valuation term env) "fail"))
             (fail)]
            [env
-            (when (debug-out?) (show-state (valuation term env) "succ"))
+            (when (debug-out?) (save-state (valuation term env) "succ"))
             (succ env bound fail)]))
 
 (define (make-user-goal term env)

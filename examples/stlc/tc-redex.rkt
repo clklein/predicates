@@ -48,11 +48,13 @@
 
 (define (generate-type-check n size)
   (for/and ([in-range n])
-    (let* ([res (fixup-vars (generate-lambda size))]
-           [exp (second (first res))]
-           [type (second (second res))]
-           [typed (equal? (term (tc ,exp))
-                          (term ,type))])
+    (let ([res (fixup-vars (generate-lambda size))])
+      (define typed
+        (match res
+          [`((t ,t) (e ,e))
+           (equal? (term (tc ,e)) (term ,t))]
+          [`((e ,e) (t ,t))
+           (equal? (term (tc ,e)) (term ,t))]))
       (unless typed
         (pretty-print exp)
         (pretty-print res)
