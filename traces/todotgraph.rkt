@@ -1,10 +1,6 @@
 #lang racket
 
-(require "../predicates.rkt")
-
-(provide write-trace-to-file)
-
-(debug-out? #t)
+(provide (all-defined-out))
 
 (define (make-tree trace)
   (let loop ([tree (vector 0)]
@@ -42,7 +38,8 @@
           (display (format "~a -> ~a\n" (second name) (second leaf)) out)))))
   (match tree
     [`#(,name)
-     (void)]
+     (display (format "~a [label=\"~a\"]\n" (second name) (first name)) out)
+     (unless (third name) (display (format "~a [color=red]\n" (second name)) out))]
     [`#(,name ,leaves ...)
      (let () 
        (write-edges name leaves)
@@ -57,8 +54,4 @@
         (display (format "\ndigraph trace~s {\nratio=compress;\nsize=\"8.5,11\";\n" i) out)
         (to-dot-format (make-tree (take trace i)) out)
         (display "}\n" out)))))
-
-(define (write-trace-to-file filename)
-  (call-with-output-file filename
-    (lambda (out) (trace-to-dot (gen-trace) out))))
 

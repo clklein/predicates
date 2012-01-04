@@ -2,7 +2,9 @@
 
 (require (for-syntax racket/match
                      syntax/id-table
-                     racket/vector))
+                     racket/vector)
+         "traces/todotgraph.rkt"
+         "traces/trees.rkt")
 
 (provide define-predicate
          generate
@@ -27,18 +29,18 @@
          order-bounding-rules?
          debug-out?
          gen-trace
-         randomize-rules?)
+         randomize-rules?
+         write-trace-to-file)
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
-    (gen-trace '())
-    (with-continuation-mark 'tree-mark '()
-      (form-name (make-term `body visible) (cstrs (hash) '()) bound
-                 (λ (env _1 _2)
-                   (when (debug-out?) (printf "\n"))
-                   (solution visible env))
-                 (λ () #f)
-                 0))))
+    (set-trace '())
+    (form-name (make-term `body visible) (cstrs (hash) '()) bound
+               (λ (env _1 _2)
+                 (when (debug-out?) (printf "\n"))
+                 (solution visible env))
+               (λ () #f)
+               '())))
 
 (define (solution vars env)
   (hash-map vars (λ (x y) (list x (valuation (lvar y) env)))))
@@ -96,31 +98,23 @@
 
 (define debug-out? (make-parameter #f))
 
-(define gen-trace (make-parameter '()))
+(define trace '())
+(define (set-trace tr) 
+  (set! trace tr))
+(define (gen-trace) trace)
+(define (append-trace next)
+  (set-trace (append trace next)))
 
-(define (tree-mark)
-  (continuation-mark-set-first
-   (current-continuation-marks)
-   'tree-mark))
-
-(define (make-tree-mark n depth)
-  (let ([mark (tree-mark)])
-    (if mark
-        (append
-         (take mark depth)
-         (list n))
-        (list n))))
-        
 
 (define-syntax (make-rule stx)
   (syntax-case stx ()
     [(_ ((prem-name . prem-body) ...) (conc-name . conc-body) rule-name instantiations def-form)
-     #`(λ (term env bound succ fail depth)
+     #`(λ (term env bound succ fail tr-loc)
          (define (save-state term state)
            (printf ".")
-           (gen-trace (append (gen-trace)
-                              (list (list (take (tree-mark) depth) rule-name state (valuation term env) 
-                                          (valuation (make-term `conc-body instantiations) env) bound depth)))))
+           (append-trace
+            (list (list tr-loc rule-name state (valuation term env) 
+                        (valuation (make-term `conc-body instantiations) env) bound (length tr-loc)))))
          (match (unify term (make-term `conc-body instantiations) env)
            [#f 
             (when (debug-out?) (save-state (valuation term env) "fail")) 
@@ -138,22 +132,19 @@
               (match ps
                 ['() (succ env bound fail)]
                 [(cons (list p b) ps’)
-                 (let ([mark (make-tree-mark n depth)])
-                 (with-continuation-mark 'tree-mark mark
-                     (p b env 
-                        (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
-                        (λ (env bound’ fail’) 
-                          (loop ps’ env 
-                                (match (bound-measure)
-                                  ['depth bound]
-                                  ['size bound’])
-                                (if (revisit-solved-goals?)
-                                    (lambda ()
-                                      (with-continuation-mark 'tree-mark mark (fail’)))
-                                    (λ ()
-                                      (fail)))
-                                (+ n 1)))
-                        fail (+ depth 1))))]))]))]))
+                 (let ([next-loc (append tr-loc (list n))])
+                   (p b env 
+                      (if (unbounded-predicate? conc-name) bound (sub1 bound)) 
+                      (λ (env bound’ fail’) 
+                        (loop ps’ env 
+                              (match (bound-measure)
+                                ['depth bound]
+                                ['size bound’])
+                              (if (revisit-solved-goals?)
+                                  (λ () (when (debug-out?) (printf "<")) (fail’))
+                                  (λ () (when (debug-out?) (printf "<")) (fail)))
+                              (+ n 1)))
+                      fail next-loc))]))]))]))
 
 (define-for-syntax (filter-rules rules b-rules)
   (let ([b-rs (syntax->datum b-rules)])
@@ -198,16 +189,15 @@
                   (match rules
                     ['() (fail)]
                     [(cons r rs)
-                     (r term env bound succ (λ () (loop rs)) depth)])))
+                     (r term env bound succ (λ () (loop rs)) tr-loc)])))
 
 (define-syntax (define-predicate stx)
   (syntax-case stx (bounding-rules always-order filtered-rules)
     [(def-form (premises ... conclusion rule-name) ... (bounding-rules b-rules ... ))
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        (let ([bounding-rules-ordered (order-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
-         #`(define (name term env bound succ fail depth)
+         #`(define (name term env bound succ fail tr-loc)
              (define instantiations (make-hash))
-             (define t-mark (tree-mark))
              (cond 
                [(or (positive? bound) 
                     (unbounded-predicate? name))
@@ -219,9 +209,8 @@
     [(def-form (premises ... conclusion rule-name) ... (filtered-rules b-rules ... ))
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        (let ([bounding-rules (filter-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
-         #`(define (name term env bound succ fail depth)
+         #`(define (name term env bound succ fail tr-loc)
              (define instantiations (make-hash))
-             (define t-mark (tree-mark))
              (cond 
                [(or (positive? bound) 
                     (unbounded-predicate? name))
@@ -233,12 +222,12 @@
     [(def-form (premises ... conclusion rule-name) ... (always-order b-rules ... ))
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
        (let ([bounding-rules-ordered (order-rules #'(((premises ...) conclusion rule-name def-form) ...) #'(b-rules ...))])
-       #`(define (name term env bound succ fail depth)
+       #`(define (name term env bound succ fail tr-loc)
            (define instantiations (make-hash))
               #,(rules-loop bounding-rules-ordered))) )]
     [(def-form (premises ... conclusion rule-name) ... )
      (with-syntax ([name (predicate-name (syntax->list #'(conclusion ...)) #'def-form)])
-       #`(define (name term env bound succ fail depth)
+       #`(define (name term env bound succ fail tr-loc)
            (define instantiations (make-hash))
            (cond 
              [(or (positive? bound) 
@@ -250,12 +239,11 @@
                      [#f (fail)]
                      [env (succ env bound fail)])])))]))
     
-(define (neq term env bound succ fail depth)
+(define (neq term env bound succ fail tr-loc)
   (define (save-state term state)
-           (printf ".")
-           (gen-trace (append (gen-trace)
-                              (list (list (take (tree-mark) depth) "neq" state (valuation term env) 
-                                          (valuation (make-term `conc-body (make-hash)) env) bound depth)))))
+    (printf ".")
+    (append-trace (list (list tr-loc "neq" state (valuation term env) 
+                              (valuation (make-term `conc-body (make-hash)) env) bound (length tr-loc)))))
   (match (disunify (first term) (second term) env)
            [#f
             (when (debug-out?) (save-state (valuation term env) "fail"))
@@ -384,3 +372,8 @@
          (error 'make-permtuations "not a permutation: ~s" s))
        (set! specs ss)
        (map (curry list-ref list) s)])))
+
+
+(define (write-trace-to-file filename)
+  (call-with-output-file filename
+    (lambda (out) (trace-to-dot (gen-trace) out))))
