@@ -1,6 +1,6 @@
 #lang racket
 
-(provide (all-defined-out))
+(provide trace-to-dot)
 
 (define (make-tree trace)
   (let loop ([tree (vector 0)]

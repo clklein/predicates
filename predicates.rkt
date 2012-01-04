@@ -30,7 +30,8 @@
          debug-out?
          gen-trace
          randomize-rules?
-         write-trace-to-file)
+         write-trace-to-file
+         (all-from-out "traces/trees.rkt"))
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
