@@ -4,7 +4,7 @@
          racket/draw
          racket/gui)
 
-(provide (all-defined-out))
+(provide show-trace)
 
 ;; tree browser prototype
 ;;
@@ -34,6 +34,8 @@
 
 (struct trace-step (path b-factor attributes)
   #:transparent)
+
+(define SCROLL-RANGE 10000)
 
 ;; doesn't currently use all the information in the trace
 (define (make-tree trace)
@@ -148,6 +150,23 @@
 (define Y-SHIFT 35)
 (define (set-y-shift s) (set! Y-SHIFT s))
 
+(define tree-canvas%
+  (class canvas%
+    
+    (super-new)
+    
+    (define scroll-handler (λ (e) #f))
+    (define/public (set-scroll-handler f)
+      (set! scroll-handler f))
+    (define/override (on-scroll event)
+      (scroll-handler event))
+    
+    (define key-handler (λ (e) #f))
+    (define/public (set-key-handler f)
+      (set! key-handler f))
+    (define/override (on-char event)
+      (key-handler event))))
+
 (define tree-frame%
   (class frame%
     
@@ -156,6 +175,8 @@
     (define width w)
     (define height h)
     (define shift (/ w 2))
+    (define t-width (layout-tree t))
+    (define depth (calculate-depth t))
     
     (define y-index 0)
     (define x-coord 0)
@@ -163,12 +184,12 @@
     (define/private (rescale factor)
       (set! scale (* scale factor)))
     (define/private (trans-x x)
-      (set! x-coord (+ x-coord x))#t)
+      (set! x-coord (+ x-coord x))
+      (update-scroll-x x-coord))
     (define/private (shift-y steps)
-      (set! y-index (+ y-index steps)))
+      (set! y-index (+ y-index steps))
+      (update-scroll-y y-index))
     
-    (define t-width (layout-tree tree))
-    (define depth (calculate-depth tree))
     (define rescale-factor (/ w t-width))
     (define scale-factor (expt rescale-factor (/ 1 depth)))
     
@@ -177,9 +198,61 @@
                [height h])
     
     (rescale rescale-factor)
-    (define canvas (new canvas% [parent this]
+    (define canvas (new tree-canvas% [parent this]
+                        [style (list 'hscroll 'vscroll)]
                         [paint-callback (lambda (canvas dc)
                                           (draw-t))]))
+    (send canvas set-scroll-range 'horizontal SCROLL-RANGE)
+    (send canvas set-scroll-range 'vertical SCROLL-RANGE)
+    (send canvas set-scroll-pos 'vertical 0)
+    (send canvas set-scroll-pos 'horizontal (/ SCROLL-RANGE 2))
+    
+    (send canvas set-scroll-handler
+          (λ (event)
+            (define dir (send event get-direction))
+            (define pos (update-scroll-pos event))
+            (define x-pos x-coord)
+            (define y-pos y-index)
+            (match dir
+              ['horizontal
+               (set! x-pos (* t-width (- .5 (/ pos SCROLL-RANGE))))]
+              ['vertical
+               (set! y-pos (- (* depth (/ pos SCROLL-RANGE))))])
+            (animate-transition (- x-pos x-coord) (- y-pos y-index))))
+    
+    (send canvas set-key-handler
+          (λ (event)
+            (define d-y 0)
+            (define d-x 0)
+            (match (send event get-key-code)
+              ['wheel-down
+               (set! d-y (- (/ depth 40)))]
+              ['wheel-up
+               (set! d-y (/ depth 40))]
+              ['wheel-right
+               (set! d-x (- (/ t-width 40)))]
+              ['wheel-left
+               (set! d-x (/ t-width 40))])
+            (animate-transition d-x d-y)))
+    
+    (define/private (update-scroll-pos event)
+      (define pos (send event get-position))
+      (match (send event get-event-type)
+        ['line-up
+         (- pos (/ SCROLL-RANGE 20))]
+        ['line-down
+         (+ pos (/ SCROLL-RANGE 20))]
+        ['page-up
+         (- pos (/ SCROLL-RANGE 20))]
+        ['page-down
+         (+ pos (/ SCROLL-RANGE 20))]
+        [else pos]))
+    
+    (define/private (update-scroll-x x)
+      (send canvas set-scroll-pos 'horizontal (+ (* (- x) (/ SCROLL-RANGE t-width)) 
+                                                 (/ SCROLL-RANGE 2))))
+    (define/private (update-scroll-y y-index)
+      (send canvas set-scroll-pos 'vertical (* (/ y-index (- depth)) SCROLL-RANGE)))
                                           
     (define dc (send canvas get-dc))
     
@@ -203,6 +276,10 @@
     (define/private (delta-x x)
       (/ (- (/ width 2) x) scale))
     
+    (define orig-x #f)
+    (define orig-y #f)
+    (define b-down? #f)
+    
     (define/override (on-subwindow-event receiver event)
       (if (send event button-down?)
           (let ([x (send event get-x)]
@@ -212,8 +289,19 @@
             (animate-transition ∆x ∆y))
           #f))
     
+    (define/private (handle-drag event)
+      (define new-x (send event get-x))
+      (define new-y (send event get-y))
+      (define ∆y (- (i-for-y new-y) (i-for-y orig-y)))
+      (define ∆x (/ (- new-x orig-x) scale))
+      (set! orig-x new-x)
+      (set! orig-y new-y)
+      (animate-transition ∆x ∆y))
+    
     (define/private (animate-transition ∆x ∆y)
       (define scaling (expt scale-factor ∆y))
+      (define trans-steps (inexact->exact (ceiling (max (abs (/ (* ∆x 40) t-width))
+                                                        (abs (/ (* ∆y 40) depth))))))
       (define dx (/ ∆x trans-steps))
       (define dy (/ ∆y trans-steps))
       (define ds (expt scaling (/ 1 trans-steps)))
