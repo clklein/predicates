@@ -19,7 +19,7 @@
   #:transparent)
 
 (struct attributes
-  (label id in-bound term coords)
+  (label id in-bound term coords [focus #:mutable])
   #:transparent)
 
 (struct coords
@@ -30,6 +30,8 @@
 (struct trace-step (path b-factor attributes)
   #:transparent)
 
+(struct lvar (id) #:prefab)
+
 (define SCROLL-RANGE 10000)
 
 ;; doesn't currently use all the information in the trace
@@ -38,7 +40,7 @@
              [t trace])
     (match t
       [`((,loc ,name ,state ,term ,body ,bound ,depth) ,remaining-traces ...)
-       (define atts (attributes name (gensym) (positive? bound) term (coords #f #f)))
+       (define atts (attributes name (gensym) (positive? bound) term (coords #f #f) #f))
        (loop (insert-tree-node loc atts tree) remaining-traces)]
       [else
        tree])))
@@ -69,15 +71,16 @@
 (define no-pen (new pen% [style 'transparent]))
 (define no-brush (new brush% [style 'transparent]))
 (define blue-brush (new brush% [color "Medium Sea Green"]))
+(define focus-brush (new brush% [color "Red"]))
 (define red-pen (new pen% [color "Steel Blue"] [width 2]))
 
 (define NODE-WIDTH 300)
 
 (define (calculate-width-for-depth t this-depth max-depth)
   (match t
-    [(gen-tree (attributes p b-f b l cs) '#())
+    [(gen-tree (attributes p b-f b l cs f) '#())
      (* NODE-WIDTH (add1 (- max-depth this-depth)))]
-    [(gen-tree (attributes p b-f b l cs) children)
+    [(gen-tree (attributes p b-f b l cs f) children)
      (apply + (cons 1 (for/list ([c children]) 
                         (calculate-width-for-depth c (add1 this-depth) max-depth))))]))
 
@@ -88,18 +91,18 @@
   (define depth 0)
   (define (check-d d t)
     (match t
-      [(gen-tree (attributes p b-f b l cs) '#())
+      [(gen-tree (attributes p b-f b l cs f) '#())
        (when (> d depth) (set! depth d))]
-      [(gen-tree (attributes p b-f b l cs) children)
+      [(gen-tree (attributes p b-f b l cs f) children)
        (for ([c children]) (check-d (add1 d) c))]))
   (check-d 1 tree)
   depth)
 
 (define (calc-size t)
   (match t
-    [(gen-tree (attributes p b-f b l cs) '#())
+    [(gen-tree (attributes p b-f b l cs f) '#())
      1]
-    [(gen-tree (attributes p b-f b l cs) children)
+    [(gen-tree (attributes p b-f b l cs f) children)
      (apply + (cons 1(for/list ([c children]) 
                 (calc-size c))))]))
   
@@ -107,10 +110,10 @@
   (define max-depth (calculate-depth t))
   (define (layout-subtree t root-x root-y depth)
     (match t
-      [(gen-tree (attributes p b-f b l cs) '#())
+      [(gen-tree (attributes p b-f b l cs f) '#())
        (set-coords-x! cs root-x)
        (set-coords-y! cs root-y)]
-      [(gen-tree (attributes p b-f b l cs) children)
+      [(gen-tree (attributes p b-f b l cs f) children)
        (define widths (for/list ([c children]) 
                         (calculate-width-for-depth c depth max-depth)))
        (define width (apply + widths))
@@ -135,6 +138,10 @@
 ;; find nearest point to click - do reverse transforms
 ;;     then search down tree by x until the right y
 
+;; finish for current iteration:
+;; click to get info
+;; step back
+
 (define (max-depth trace)
   (define max-d 0)
   (let loop ([t trace])
@@ -151,12 +158,14 @@
     (init trace-init)
     
     (define step 0)
-    (define tree (vector 0))
+    (define tree #f)
     (define trace trace-init)
     (define final-tree (make-tree trace))
     (define width (calculate-width final-tree))
     (define depth (calculate-depth final-tree))
     (define last-atts #f)
+    (define lvars->names (make-hash))
+    (define names-inc 0)
     
     (super-new)
     
@@ -175,18 +184,88 @@
     (define/public (current-atts)
       last-atts)
     
+    (define/public (fixup-var-names term)
+      (match term
+        [(lvar id)
+         (name-for-lvar id)]
+        [`(,subterms ...)
+         (for/list ([s subterms]) (fixup-var-names s))]
+        [else term]))
+    
+    (define/public (update-focus x y-index)
+      (define (get-x t-node)
+        (match t-node
+          [(gen-tree (attributes p b-f b l (coords x y) f) cs)
+           x]
+          [else +inf.0]))
+      (defocus)
+      (define closest-node
+        (let recur ([t tree]
+                    [d (- y-index)])
+          (cond
+            [(= d 0)
+             t]
+            [else
+             (match t
+               [(gen-tree as '#())
+                #f]
+               [(gen-tree as children)
+                (define c-closest-ns (for/list ([c children])
+                                       (recur c (sub1 d))))
+                (first (sort c-closest-ns <
+                             #:key (λ (c) (if c 
+                                              (abs (- x (get-x c)))
+                                              +inf.0))))])])))
+      (match closest-node 
+        [(gen-tree as children)
+         (set-attributes-focus! as #t)
+         as]))
+    
+    
+    
+    (define/public (focus-coords)
+      (let recur ([t tree])
+        (match t
+          [(gen-tree (attributes p b-f b l cs #t) children)
+           cs]
+          [(gen-tree as '#())
+           #f]
+          [(gen-tree as children)
+           (define s-t-l (memf (λ (e) e)
+                               (for/list ([c children]) (recur c))))
+           (if (or (not s-t-l) (empty? s-t-l))
+               #f
+               (first s-t-l))])))
+    
+    (define/private (defocus)
+      (let recur ([t tree])
+        (match t
+          [(gen-tree as '#())
+           (set-attributes-focus! as #f)]
+          [(gen-tree as children)
+           (set-attributes-focus! as #f)
+           (for ([c children]) (recur c))])))
+    
     (define/private (update-tree-one-step)
       (define trace-step (list-ref trace step))
+      (when tree (defocus))
       (match trace-step
         [`(,loc ,name ,state ,term ,body ,bound ,depth)
-         (define atts (attributes name (gensym) (positive? bound) term (coords #f #f)))
+         (define atts (attributes name (gensym) (positive? bound) term (coords #f #f) #t))
          (set! last-atts atts)
          (set! tree (insert-tree-node loc atts tree))]
         [else (error "Trace had incorrect format, failed to update tree")])
-      ;(set! width (calculate-width tree))
-      ;(set! depth (calculate-depth tree))
-      (layout-tree tree))))
-      
+      (layout-tree tree))
+    
+    (define/private (name-for-lvar id)
+      (hash-ref! lvars->names id
+                 (λ () 
+                   (define id-string (symbol->string id))
+                   (set! names-inc (add1 names-inc))
+                   (string->symbol
+                    (string-append "?" (substring id-string 0 1) "_" (number->string names-inc))))))
+    ))
+;; end trace-state%      
 
   
 (define yscale-base .62)
@@ -336,16 +415,25 @@
     
     (define/private (step-redraw)
       (send trace take-step)
-      (send canvas refresh-now
-              (λ (dc) (draw-t)))
+      (define f-coords (send trace focus-coords))
+      (cond
+        [f-coords
+         (define center-x (x-inv-map shift))
+         (define ∆x (- center-x (coords-x f-coords)))
+         (define ∆y (- 4 (+ y-index (coords-y f-coords))))
+         (displayln (format "~s ~s ~s" x-coord (coords-x f-coords) ∆x))
+         (animate-transition ∆x ∆y)]
+        [else
+         (send canvas refresh-now
+               (λ (dc) (draw-t)))])
       (update-messages))
     
     (define/private (update-messages [atts #f])
       (define as (if atts atts (send trace current-atts)))
       (match as
-        [(attributes name id bound term coords)
+        [(attributes name id bound term coords f)
          (send rule-message set-value (format "~s" name))
-         (send term-message set-value (format "~s" term))]))
+         (send term-message set-value (format "~s" (send trace fixup-var-names term)))]))
     
     
     (define y-scale (/ h (ybase-sum)))
@@ -361,23 +449,33 @@
     (define/private (delta-y y)
       (define new-i (i-for-y y))
       (define old-i (find-ybase-center))
-      (- old-i new-i))
+      (sub1 (- old-i new-i)))
     (define/private (delta-x x)
       (/ (- (/ width 2) x) scale))
     
-;    (define/override (on-subwindow-event receiver event)
-;      (if (send event button-down?)
-;          (let ([x (send event get-x)]
-;                [y (send event get-y)])
-;            (define ∆y (delta-y y))
-;            (define ∆x (delta-x x))
-;            (animate-transition ∆x ∆y))
-;          #f))
+    (define/private (x-inv-map x)
+      (- (/ (- x shift) scale) x-coord))
+    
+    (define/override (on-subwindow-event receiver event)
+      (if (and (send event button-down?)
+               (eq? receiver canvas))
+          (let ([x (send event get-x)]
+                [y (send event get-y)])
+            (define ∆y (delta-y y))
+            (define ∆x (delta-x x))
+            (define actual-y (+ y-index ∆y))
+            (define actual-x (x-inv-map x))
+            (define focus-as (send trace update-focus actual-x (round actual-y)))
+            (update-messages focus-as)
+            (send canvas refresh-now
+              (λ (dc) (draw-t))))
+          #f))
     
     (define/private (animate-transition ∆x ∆y)
       (define scaling (expt scale-factor ∆y))
       (define trans-steps (inexact->exact (ceiling (max (abs (/ (* ∆x 40) (t-width)))
-                                                        (abs (/ (* ∆y 40) (depth)))))))
+                                                        (abs (/ (* ∆y 40) (depth)))
+                                                        1))))
       (define dx (/ ∆x trans-steps))
       (define dy (/ ∆y trans-steps))
       (define ds (expt scaling (/ 1 trans-steps)))
@@ -431,27 +529,32 @@
         (send dc set-pen red-pen)
         (send dc draw-line (+ shift x1) (map-y y1) (+ shift x2) (map-y y2))))
     
-    (define/private (node x-raw y-raw)
+    (define/private (node x-raw y-raw focus?)
       (define x (adjust-x x-raw))
       (define y (adjust-y y-raw))
       (when (and (x . > . (- shift)) (x . < . shift)
-                 (y . < . 4) (y . > . -1))
+                 (y . < . 6) (y . > . -1))
         (send dc set-pen no-pen)
-        (send dc set-brush blue-brush)
-        (send dc draw-ellipse (+ shift (- x 5)) (- (map-y y) 5) 10 10)))
+        (cond
+          [focus?
+           (send dc set-brush focus-brush)
+           (send dc draw-ellipse (+ shift (- x 7)) (- (map-y y) 7) 14 14)]
+          [else
+           (send dc set-brush blue-brush)
+           (send dc draw-ellipse (+ shift (- x 5)) (- (map-y y) 5) 10 10)])))
     
     (define/private (draw-t)
       (define (draw-subtree t d)
         (match t
-          [(gen-tree (attributes p b-f b l (coords x y)) '#())
-           (node x y)]
-          [(gen-tree (attributes p b-f b l (coords x y)) children)
+          [(gen-tree (attributes p b-f b l (coords x y) f) '#())
+           (node x y f)]
+          [(gen-tree (attributes p b-f b l (coords x y) f) children)
            (for ([c children])
              (match c 
-               [(gen-tree (attributes p b-f b l (coords c-x c-y)) children)
+               [(gen-tree (attributes p b-f b l (coords c-x c-y) f) children)
                 (line x y c-x c-y)
                 (draw-subtree c (add1 d))]))
-           (node x y)]))
+           (node x y f)]))
       (send dc set-smoothing 'aligned)
       (draw-subtree (send trace get-tree) 0))))
 
