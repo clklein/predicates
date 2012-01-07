@@ -7,11 +7,6 @@
 (provide show-trace)
 
 ;; tree browser prototype
-;;
-;; to browse a random tree, just use (random-tree)
-;; (building a tree is sometimes slow - the generation process is
-;; unnecessarily complex to mimic the traces that come from the
-;; program genreator)
 ;; 
 ;; uses a mapping to a geometric series to get an "axis at infinity" effect
 ;;
@@ -131,6 +126,68 @@
 
 (define (layout-tree t)
   (basic-layout-tree t))
+
+;; layout for a trace
+;; need max depth - get from locs
+;; need max width for each loc
+;; pre-layout - make list of subtrees for each loc
+;; take max in layout
+;; find nearest point to click - do reverse transforms
+;;     then search down tree by x until the right y
+
+(define (max-depth trace)
+  (define max-d 0)
+  (let loop ([t trace])
+    (match t
+      [`((,loc ,other-stuff ...) ,remaining-traces ...)
+       (when (> (add1 (length loc)) max-d)
+         (set! max-d (add1 (length loc))))
+       (loop remaining-traces)]
+      [else max-d])))
+
+(define trace-state%
+  (class object%
+    
+    (init trace-init)
+    
+    (define step 0)
+    (define tree (vector 0))
+    (define trace trace-init)
+    (define final-tree (make-tree trace))
+    (define width (calculate-width final-tree))
+    (define depth (calculate-depth final-tree))
+    (define last-atts #f)
+    
+    (super-new)
+    
+    (update-tree-one-step)
+    
+    (define/public (take-step)
+      (unless (equal? step (sub1 (length trace)))
+        (set! step (add1 step))
+        (update-tree-one-step)))
+    
+    (define/public (get-tree) tree)
+    
+    (define/public (get-width) width)
+    (define/public (get-depth) depth)
+    
+    (define/public (current-atts)
+      last-atts)
+    
+    (define/private (update-tree-one-step)
+      (define trace-step (list-ref trace step))
+      (match trace-step
+        [`(,loc ,name ,state ,term ,body ,bound ,depth)
+         (define atts (attributes name (gensym) (positive? bound) term (coords #f #f)))
+         (set! last-atts atts)
+         (set! tree (insert-tree-node loc atts tree))]
+        [else (error "Trace had incorrect format, failed to update tree")])
+      ;(set! width (calculate-width tree))
+      ;(set! depth (calculate-depth tree))
+      (layout-tree tree))))
+      
+
   
 (define yscale-base .62)
 (define (set-y-base f) (set! yscale-base f))
@@ -171,12 +228,17 @@
   (class frame%
     
     (init t w h)
-    (define tree t)
+    (define trace (new trace-state% [trace-init t]))
     (define width w)
     (define height h)
     (define shift (/ w 2))
-    (define t-width (layout-tree t))
-    (define depth (calculate-depth t))
+    
+    (super-new [label "Tree Browser"])
+    
+    (define (t-width)
+      (send trace get-width))
+    (define (depth)
+      (send trace get-depth))
     
     (define y-index 0)
     (define x-coord 0)
@@ -190,15 +252,13 @@
       (set! y-index (+ y-index steps))
       (update-scroll-y y-index))
     
-    (define rescale-factor (/ w t-width))
-    (define scale-factor (expt rescale-factor (/ 1 depth)))
-    
-    (super-new [label "Tree Browser"]
-               [width w]
-               [height h])
+    (define rescale-factor (/ w (t-width)))
+    (define scale-factor (expt rescale-factor (/ 1 (depth))))
     
     (rescale rescale-factor)
     (define canvas (new tree-canvas% [parent this]
+                        [min-width w]
+                        [min-height h]
                         [style (list 'hscroll 'vscroll)]
                         [paint-callback (lambda (canvas dc)
                                           (draw-t))]))
@@ -215,9 +275,9 @@
             (define y-pos y-index)
             (match dir
               ['horizontal
-               (set! x-pos (* t-width (- .5 (/ pos SCROLL-RANGE))))]
+               (set! x-pos (* (t-width) (- .5 (/ pos SCROLL-RANGE))))]
               ['vertical
-               (set! y-pos (- (* depth (/ pos SCROLL-RANGE))))])
+               (set! y-pos (- (* (depth) (/ pos SCROLL-RANGE))))])
             (animate-transition (- x-pos x-coord) (- y-pos y-index))))
     
     (send canvas set-key-handler
@@ -226,13 +286,13 @@
             (define d-x 0)
             (match (send event get-key-code)
               ['wheel-down
-               (set! d-y (- (/ depth 40)))]
+               (set! d-y (- (/ (depth) 40)))]
               ['wheel-up
-               (set! d-y (/ depth 40))]
+               (set! d-y (/ (depth) 40))]
               ['wheel-right
-               (set! d-x (- (/ t-width 40)))]
+               (set! d-x (- (/ (t-width) 40)))]
               ['wheel-left
-               (set! d-x (/ t-width 40))])
+               (set! d-x (/ (t-width) 40))])
             (animate-transition d-x d-y)))
     
     (define/private (update-scroll-pos event)
@@ -249,15 +309,44 @@
         [else pos]))
     
     (define/private (update-scroll-x x)
-      (send canvas set-scroll-pos 'horizontal (+ (* (- x) (/ SCROLL-RANGE t-width)) 
+      (send canvas set-scroll-pos 'horizontal (+ (* (- x) (/ SCROLL-RANGE (t-width))) 
                                                  (/ SCROLL-RANGE 2))))
     (define/private (update-scroll-y y-index)
-      (send canvas set-scroll-pos 'vertical (* (/ y-index (- depth)) SCROLL-RANGE)))
+      (send canvas set-scroll-pos 'vertical (* (/ y-index (- (depth))) SCROLL-RANGE)))
                                           
     (define dc (send canvas get-dc))
     
     (define/public (display)
       (send this show #t))
+    
+    (define panel1 (new vertical-panel% [parent this]
+                             [min-height 80]
+                             [stretchable-height 80]))
+    (define panel2 (new horizontal-panel% [parent panel1]
+                             [min-height 40]
+                             [stretchable-height 40]))
+    (define step-button (new button% [parent panel2]
+                             [label "Step"]
+                             [callback (λ (b e) (step-redraw))]))
+    (define rule-message (new text-field% [parent panel2]
+                              [label "Rule:"]))
+    (define term-message (new text-field% [parent panel1]
+                              [label "Term:"]))
+    (update-messages)
+    
+    (define/private (step-redraw)
+      (send trace take-step)
+      (send canvas refresh-now
+              (λ (dc) (draw-t)))
+      (update-messages))
+    
+    (define/private (update-messages [atts #f])
+      (define as (if atts atts (send trace current-atts)))
+      (match as
+        [(attributes name id bound term coords)
+         (send rule-message set-value (format "~s" name))
+         (send term-message set-value (format "~s" term))]))
+    
     
     (define y-scale (/ h (ybase-sum)))
     (define y-cs (for/list ([y 10])
@@ -276,32 +365,19 @@
     (define/private (delta-x x)
       (/ (- (/ width 2) x) scale))
     
-    (define orig-x #f)
-    (define orig-y #f)
-    (define b-down? #f)
-    
-    (define/override (on-subwindow-event receiver event)
-      (if (send event button-down?)
-          (let ([x (send event get-x)]
-                [y (send event get-y)])
-            (define ∆y (delta-y y))
-            (define ∆x (delta-x x))
-            (animate-transition ∆x ∆y))
-          #f))
-    
-    (define/private (handle-drag event)
-      (define new-x (send event get-x))
-      (define new-y (send event get-y))
-      (define ∆y (- (i-for-y new-y) (i-for-y orig-y)))
-      (define ∆x (/ (- new-x orig-x) scale))
-      (set! orig-x new-x)
-      (set! orig-y new-y)
-      (animate-transition ∆x ∆y))
+;    (define/override (on-subwindow-event receiver event)
+;      (if (send event button-down?)
+;          (let ([x (send event get-x)]
+;                [y (send event get-y)])
+;            (define ∆y (delta-y y))
+;            (define ∆x (delta-x x))
+;            (animate-transition ∆x ∆y))
+;          #f))
     
     (define/private (animate-transition ∆x ∆y)
       (define scaling (expt scale-factor ∆y))
-      (define trans-steps (inexact->exact (ceiling (max (abs (/ (* ∆x 40) t-width))
-                                                        (abs (/ (* ∆y 40) depth))))))
+      (define trans-steps (inexact->exact (ceiling (max (abs (/ (* ∆x 40) (t-width)))
+                                                        (abs (/ (* ∆y 40) (depth)))))))
       (define dx (/ ∆x trans-steps))
       (define dy (/ ∆y trans-steps))
       (define ds (expt scaling (/ 1 trans-steps)))
@@ -377,14 +453,12 @@
                 (draw-subtree c (add1 d))]))
            (node x y)]))
       (send dc set-smoothing 'aligned)
-      (draw-subtree tree 0))))
+      (draw-subtree (send trace get-tree) 0))))
 
 ;;; end treeframe%
          
 (define (show-trace trace)
-  (define t (make-tree trace))
-  (printf "~s nodes\n" (calc-size t))
-  (define tf (new tree-frame% [t t] [w 700] [h 700]))
+  (define tf (new tree-frame% [t trace] [w 700] [h 700]))
   (send tf display))
 
                      
