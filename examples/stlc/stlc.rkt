@@ -160,6 +160,3 @@
 (check-not-equal?
  (generates-well-typed? 5 100)
  #f)
-
-(bound-measure 'depth)
-(debug-out? #t)
