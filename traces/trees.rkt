@@ -4,7 +4,9 @@
          racket/draw
          racket/gui)
 
-(provide show-trace)
+(provide (contract-out
+          [show-trace-frame (-> well-formed-trace? any)])
+         make-tree)
 
 ;; tree browser prototype
 ;; 
@@ -13,6 +15,45 @@
 ;; TODO:
 ;; * the layout algorithm is pretty dumb right now, could definitely be improved
 ;; * zooming/panning starts getting slow for trees with around 1,000 nodes
+;;
+
+
+(define loc? (listof exact-nonnegative-integer?))
+(define trace-element? (cons/c loc? list?))
+(define trace? (listof trace-element?))
+;; well-formed trace: nodes with no siblings have a parent
+;; and nodes that aren't the oldest sibling (index 0) have a next-youngest
+;; this is a little slow right now - mabe overkill, but probably will have a similar
+;; complexity to a layout algorithm that scans the entire trace
+(define (trace-is-well-formed? trace)
+  (define locs (set))
+  (define (add-check-for-replaces loc)
+    (set! locs (set-remove-all locs (curry loc-prefix-same? loc)))
+    (set! locs (set-add locs loc)))
+  (for/and ([t-e trace])
+    (match t-e
+      [`(() ,rest ...)
+       (set! locs (set `()))
+       #t]
+      [`((,locs-prefix ... 0) ,rest ...)
+       (add-check-for-replaces `(,@locs-prefix 0))
+       (set-member? locs locs-prefix)]
+      [`((,locs-prefix ... ,last-loc) ,rest ...)
+       (add-check-for-replaces `(,@locs-prefix ,last-loc))
+       (set-member? locs `(,@locs-prefix ,(sub1 last-loc)))])))
+(define well-formed-trace? (and/c trace? trace-is-well-formed?))
+
+(define (set-remove-all old-set pred?)
+  (for/fold ([new-s (set)])
+    ([s old-set])
+    (if (pred? s)
+        new-s
+        (set-add new-s s))))
+
+(define (loc-prefix-same? parent child)
+  (and (<= (length parent) (length child))
+       (for/and ([e1 parent] [e2 child])
+         (equal? e1 e2))))
 
 (struct gen-tree
   (attributes [children #:mutable])
@@ -41,38 +82,90 @@
     (match t
       [`((,loc ,name ,state ,term ,body ,bound ,depth) ,remaining-traces ...)
        (define atts (attributes name (gensym) (positive? bound) term (coords #f #f) #f))
-       (loop (insert-tree-node loc atts tree) remaining-traces)]
+       (loop (insert-tree-atts loc atts tree) remaining-traces)]
       [else
        tree])))
 
-(define (insert-tree-node loc attributes tree-root)
-  (define (insert-node loc attributes tree)
+(define (trace-step-loc t-step)
+  (match t-step
+      [`(,loc ,name ,state ,term ,body ,bound ,depth)
+       loc]))
+
+(define (trace-step->atts t-step)
+  (match t-step
+      [`(,loc ,name ,state ,term ,body ,bound ,depth)
+       (attributes name (gensym) (positive? bound) term (coords #f #f) #f)]))
+
+(define (insert-tree-atts loc attributes tree-root)
+  (insert-tree-node loc (gen-tree attributes (make-vector 0)) tree-root))
+
+(define (insert-tree-node loc node tree-root)
+  (define (insert-node loc node tree)
     (match loc
       [`(,i) ;; append or replace
        (cond [(= (vector-length (gen-tree-children tree)) i)
               (define new-children (vector-append (gen-tree-children tree)
-                                                  (vector (gen-tree attributes (make-vector 0)))))
-              (set-gen-tree-children! tree new-children)]
+                                                  (vector node)))
+              (set-gen-tree-children! tree new-children)
+              #f]
              [(< i (vector-length (gen-tree-children tree)))
+              (define old-node (vector-ref (gen-tree-children tree) i))
               (vector-set! (gen-tree-children tree) i
-                           (gen-tree attributes (make-vector 0)))]
+                           node)
+              old-node]
              [else (error "tree update wasn't an append or replace")])]
       [`(,i ,is ...)
-       (insert-node is attributes (vector-ref (gen-tree-children tree) i))]
+       (insert-node is node (vector-ref (gen-tree-children tree) i))]
       ['() ;; initial tree (or replacement)
-       (set! tree-root (gen-tree attributes (make-vector 0)))]
+       (set! tree-root node)]
       [else (error "tree didn't have expected generation pattern" loc tree)]))
-  (insert-node loc attributes tree-root)
+  (insert-node loc node tree-root)
   tree-root)
+
+(define (get-node-at-loc loc tree-root)
+  (let recur ([t tree-root]
+              [l loc])
+    (match l
+      [`(,i)
+       (if (and (0 . < . (vector-length (gen-tree-children t)))
+                (i . < . (vector-length (gen-tree-children t))))
+           (vector-ref (gen-tree-children t) i)
+           #f)]
+      ['() t]
+      [`(,i ,is ...)
+       (recur (vector-ref (gen-tree-children t) i) is)]
+      [else #f])))
+
+(define (remove-tree-node loc tree-root)
+  (let recur ([t tree-root]
+              [l loc])
+    (match l
+      [`(,i)
+       (if (= (vector-length (gen-tree-children t)) (+ i 1))
+           (set-gen-tree-children! t (vector-take (gen-tree-children t) i))
+           (error "can only remove the last child of a node"))]
+      [`(,i ,is ...)
+       (recur (vector-ref (gen-tree-children t) i) is)]
+      [`()
+       (error "can't remove tree root")]))
+  tree-root)
+
+
+(define (set-focus-to-true node)
+  (match node
+    [(gen-tree as cs)
+     (set-attributes-focus! as #t)]
+    [else
+     (void)]))
 
 (define (all-trees trace)
   (for/list ([i (length trace)]) (make-tree (take trace i))))
  
 (define no-pen (new pen% [style 'transparent]))
 (define no-brush (new brush% [style 'transparent]))
-(define blue-brush (new brush% [color "Medium Sea Green"]))
+(define green-brush (new brush% [color "Medium Sea Green"]))
 (define focus-brush (new brush% [color "Red"]))
-(define red-pen (new pen% [color "Steel Blue"] [width 2]))
+(define blue-pen (new pen% [color "Steel Blue"] [width 2]))
 
 (define NODE-WIDTH 300)
 
@@ -152,6 +245,9 @@
        (loop remaining-traces)]
       [else max-d])))
 
+;; handles keeping track of the trace
+;; and mutating the tree
+;; tree-frame does the drawing
 (define trace-state%
   (class object%
     
@@ -166,6 +262,7 @@
     (define last-atts #f)
     (define lvars->names (make-hash))
     (define names-inc 0)
+    (define subtree-stack '())
     
     (super-new)
     
@@ -175,6 +272,29 @@
       (unless (equal? step (sub1 (length trace)))
         (set! step (add1 step))
         (update-tree-one-step)))
+    
+    (define/public (step-back)
+      (unless (= step 0)
+        (match (first subtree-stack)
+          [`(,loc ,subtree)
+           (if subtree
+             (set! tree (insert-tree-node loc subtree tree))
+             (set! tree (remove-tree-node loc tree)))])
+        (set! subtree-stack (rest subtree-stack))
+        (set! step (sub1 step))
+        (defocus)
+        (set-focus-to-true (get-node-at-loc (trace-step-loc (list-ref trace step)) tree))
+        (set! last-atts (trace-step->atts (list-ref trace step)))
+        (layout-tree tree)))
+    
+    (define/public (rewind)
+      (set! step 0)
+      (set! tree #f)
+      (update-tree-one-step))
+    
+    (define/public (fast-forward)
+      (for ([i (in-range (add1 step) (length trace))])
+        (take-step)))
     
     (define/public (get-tree) tree)
     
@@ -201,7 +321,7 @@
       (defocus)
       (define closest-node
         (let recur ([t tree]
-                    [d (- y-index)])
+                    [d (sub1 y-index)])
           (cond
             [(= d 0)
              t]
@@ -219,9 +339,8 @@
       (match closest-node 
         [(gen-tree as children)
          (set-attributes-focus! as #t)
-         as]))
-    
-    
+         as]
+        [else #f]))
     
     (define/public (focus-coords)
       (let recur ([t tree])
@@ -251,9 +370,10 @@
       (when tree (defocus))
       (match trace-step
         [`(,loc ,name ,state ,term ,body ,bound ,depth)
+         (set! subtree-stack (cons (list loc (get-node-at-loc loc tree)) subtree-stack))
          (define atts (attributes name (gensym) (positive? bound) term (coords #f #f) #t))
          (set! last-atts atts)
-         (set! tree (insert-tree-node loc atts tree))]
+         (set! tree (insert-tree-atts loc atts tree))]
         [else (error "Trace had incorrect format, failed to update tree")])
       (layout-tree tree))
     
@@ -263,12 +383,13 @@
                    (define id-string (symbol->string id))
                    (set! names-inc (add1 names-inc))
                    (string->symbol
-                    (string-append "?" (substring id-string 0 1) "_" (number->string names-inc))))))
+                    (string-append "?" (substring id-string 0 1) "_" 
+                                   (number->string names-inc))))))
     ))
 ;; end trace-state%      
 
   
-(define yscale-base .62)
+(define yscale-base .646)
 (define (set-y-base f) (set! yscale-base f))
 (define (ybase-sum) (/ yscale-base (- 1 yscale-base)))
 (define (find-ybase-center)
@@ -312,7 +433,7 @@
     (define height h)
     (define shift (/ w 2))
     
-    (super-new [label "Tree Browser"])
+    (super-new [label "Generation Trace"])
     
     (define (t-width)
       (send trace get-width))
@@ -361,18 +482,28 @@
     
     (send canvas set-key-handler
           (λ (event)
-            (define d-y 0)
-            (define d-x 0)
-            (match (send event get-key-code)
-              ['wheel-down
-               (set! d-y (- (/ (depth) 40)))]
-              ['wheel-up
-               (set! d-y (/ (depth) 40))]
-              ['wheel-right
-               (set! d-x (- (/ (t-width) 40)))]
-              ['wheel-left
-               (set! d-x (/ (t-width) 40))])
-            (animate-transition d-x d-y)))
+            (define-values (d-x d-y)
+              (match (send event get-key-code)
+                ['wheel-down
+                 (values 0 (- (/ (depth) 40)))]
+                ['wheel-up
+                 (values 0 (/ (depth) 40))]
+                ['wheel-right
+                 (values (- (/ (t-width) 40)) 0)]
+                ['wheel-left
+                 (values (/ (t-width) 40) 0)]
+                ['left
+                 (send trace step-back)
+                 (update/all-steps)
+                 (values #f #f)]
+                ['right
+                 (send trace take-step)
+                 (update/all-steps)
+                 (values #f #f)]
+                [else
+                 (values #f #f)]))
+            (when (and d-x d-y)
+              (animate-transition d-x d-y))))
     
     (define/private (update-scroll-pos event)
       (define pos (send event get-position))
@@ -404,24 +535,39 @@
     (define panel2 (new horizontal-panel% [parent panel1]
                              [min-height 40]
                              [stretchable-height 40]))
-    (define step-button (new button% [parent panel2]
-                             [label "Step"]
-                             [callback (λ (b e) (step-redraw))]))
     (define rule-message (new text-field% [parent panel2]
                               [label "Rule:"]))
+    (define rewind-button (new button% [parent panel2]
+                               [label "<<"]
+                               [callback (λ (b e)
+                                           (send trace rewind)
+                                           (update/all-steps))]))
+    (define back-button (new button% [parent panel2]
+                             [label "Back"]
+                             [callback (λ (b e)
+                                         (send trace step-back)
+                                         (update/all-steps))]))
+    (define step-button (new button% [parent panel2]
+                             [label "Step"]
+                             [callback (λ (b e)
+                                         (send trace take-step)
+                                         (update/all-steps))]))
+    (define ff-button (new button% [parent panel2]
+                           [label ">>"]
+                           [callback (λ (b e)
+                                       (send trace fast-forward)
+                                       (update/all-steps))]))
     (define term-message (new text-field% [parent panel1]
                               [label "Term:"]))
     (update-messages)
     
-    (define/private (step-redraw)
-      (send trace take-step)
+    (define/private (update/all-steps)
       (define f-coords (send trace focus-coords))
       (cond
         [f-coords
          (define center-x (x-inv-map shift))
          (define ∆x (- center-x (coords-x f-coords)))
-         (define ∆y (- 4 (+ y-index (coords-y f-coords))))
-         (displayln (format "~s ~s ~s" x-coord (coords-x f-coords) ∆x))
+         (define ∆y (- 5 (+ y-index (coords-y f-coords))))
          (animate-transition ∆x ∆y)]
         [else
          (send canvas refresh-now
@@ -446,13 +592,8 @@
                       (values (+ 0.0 (abs (- y y-c))) i)))
       (hash-ref diffs (+ 0.0 (apply min (hash-keys diffs)))))
     
-    (define/private (delta-y y)
-      (define new-i (i-for-y y))
-      (define old-i (find-ybase-center))
-      (sub1 (- old-i new-i)))
     (define/private (delta-x x)
       (/ (- (/ width 2) x) scale))
-    
     (define/private (x-inv-map x)
       (- (/ (- x shift) scale) x-coord))
     
@@ -461,9 +602,8 @@
                (eq? receiver canvas))
           (let ([x (send event get-x)]
                 [y (send event get-y)])
-            (define ∆y (delta-y y))
             (define ∆x (delta-x x))
-            (define actual-y (+ y-index ∆y))
+            (define actual-y (- (i-for-y y) y-index))
             (define actual-x (x-inv-map x))
             (define focus-as (send trace update-focus actual-x (round actual-y)))
             (update-messages focus-as)
@@ -526,21 +666,21 @@
                 (and (x2 . > . (- shift)) (x2 . < . shift) 
                      (y2 . > . -1) (y2 . < . 7)))
         (send dc set-brush no-brush)
-        (send dc set-pen red-pen)
+        (send dc set-pen blue-pen)
         (send dc draw-line (+ shift x1) (map-y y1) (+ shift x2) (map-y y2))))
     
     (define/private (node x-raw y-raw focus?)
       (define x (adjust-x x-raw))
       (define y (adjust-y y-raw))
       (when (and (x . > . (- shift)) (x . < . shift)
-                 (y . < . 6) (y . > . -1))
+                 (y . < . 7) (y . > . -1))
         (send dc set-pen no-pen)
         (cond
           [focus?
            (send dc set-brush focus-brush)
            (send dc draw-ellipse (+ shift (- x 7)) (- (map-y y) 7) 14 14)]
           [else
-           (send dc set-brush blue-brush)
+           (send dc set-brush green-brush)
            (send dc draw-ellipse (+ shift (- x 5)) (- (map-y y) 5) 10 10)])))
     
     (define/private (draw-t)
@@ -560,9 +700,10 @@
 
 ;;; end treeframe%
          
-(define (show-trace trace)
+(define (show-trace-frame trace)
   (define tf (new tree-frame% [t trace] [w 700] [h 700]))
   (send tf display))
+
 
                      
 

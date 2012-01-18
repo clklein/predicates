@@ -31,7 +31,7 @@
          gen-trace
          randomize-rules?
          write-trace-to-file
-         (all-from-out "traces/trees.rkt"))
+         show-trace)
 
 (define-syntax-rule (generate (form-name . body) bound)
   (let ([visible (make-hash)])
@@ -308,6 +308,7 @@
                                     (cstrs-dqs cs))])])))
 
 ;; solve : term term env -> (or/c (eqs-hash . new-eqs-hash) #f)
+;; env <==> eqs-hash
 (define (solve t u e)
   (define new-e (hash)) ; new constraint eqns - for disunify
   (define (resolve t)
@@ -378,3 +379,6 @@
 (define (write-trace-to-file filename)
   (call-with-output-file filename
     (lambda (out) (trace-to-dot (gen-trace) out))))
+
+(define (show-trace)
+  (show-trace-frame (gen-trace)))

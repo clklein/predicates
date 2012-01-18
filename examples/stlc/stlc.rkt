@@ -6,7 +6,8 @@
 
 (provide generate-boolean
          generate-lambda
-         fixup-vars)
+         fixup-vars
+         (all-from-out "../../predicates.rkt"))
 
 ;; e ::= (λ (x t) e) | (app e e) | (var x)
 ;;       | (if0 e e e) | true | false
@@ -84,7 +85,7 @@
 
 (define (generate-lambda size)
   (parameterize ([user-goal-solver generate-base])
-    (generate (typeof-e () (? e) (? t)) size)))
+    (fixup-vars (generate (typeof-e () (? e) (? t)) size))))
 
 (define (generate-boolean size)
   (parameterize ([user-goal-solver generate-base])
@@ -159,3 +160,6 @@
 (check-not-equal?
  (generates-well-typed? 5 100)
  #f)
+
+(bound-measure 'depth)
+(debug-out? #t)
